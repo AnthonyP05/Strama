@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace Strama.HS;
 
 public record UdpHandshakeInfo
