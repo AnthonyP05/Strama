@@ -5,12 +5,12 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using Strama.HS;
+using Strama.Records;
 
 class TcpServer
 {
 
-    public UdpHandshakeInfo Data = new UdpHandshakeInfo();
+    public HandshakeConfig Data = new HandshakeConfig();
 
     static void Main()
     {

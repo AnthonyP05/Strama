@@ -3,11 +3,11 @@ namespace Strama.Network;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text;
-using Strama.HS;
+using Strama.Records;
 
 class TCPClient
 {
-    public UdpHandshakeInfo Data = new UdpHandshakeInfo();
+    public HandshakeConfig Data = new HandshakeConfig();
 
     static void Main()
     {

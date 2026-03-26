@@ -1,14 +1,12 @@
-using Strama.Network;
+namespace Strama.Network;
 
-using System.Net;
 using System.Diagnostics;
-using System.Net.Sockets;
-using Strama.HS;
+using Strama.Records;
 
 public class UDPSender
 {
 
-    public static void Start(UdpHandshakeInfo data, CancellationToken ct)
+    public static void Start(HandshakeConfig data, CancellationToken ct)
     {
         try
         {         

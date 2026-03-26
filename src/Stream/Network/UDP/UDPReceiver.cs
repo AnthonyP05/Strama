@@ -1,9 +1,11 @@
+namespace Strama.Network;
+
+using Strama.Records;
 using System.Diagnostics;
-using Strama.HS;
 
 public class UDPReceiver
 {
-    public static Task StartListener(UdpHandshakeInfo data)
+    public static Task StartListener(HandshakeConfig data)
     {
         Console.WriteLine($"Starting FFplay to listen for UDP stream on port {data.UdpPort}");   
         

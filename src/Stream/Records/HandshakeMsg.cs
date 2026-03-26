@@ -1,6 +1,6 @@
-namespace Strama.HS;
+namespace Strama.Records;
 
-public record UdpHandshakeInfo
+public record HandshakeConfig
 {
     public int UdpPort { get; set; } = 8889;
 
@@ -27,5 +27,5 @@ public record UdpHandshakeInfo
 public record HandshakeResponse
 {
     public bool Accepted { get; set; }
-    public UdpHandshakeInfo? Config { get; set; }
+    public HandshakeConfig? Config { get; set; }
 }
