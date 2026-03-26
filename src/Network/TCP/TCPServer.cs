@@ -19,7 +19,7 @@ class TcpServer
 
         var ts = new TcpServer();
 
-        var listener = new TcpListener(ts.Data.TcpIP, ts.Data.TcpPort);
+        var listener = new TcpListener(IPAddress.Parse(ts.Data.TcpIP), ts.Data.TcpPort);
 
         // Future update: Only start listening IF a user is trying to connect... 
         // (idk if thats possible because how will it know...?)
@@ -42,8 +42,6 @@ class TcpServer
 
             var stream = client.GetStream(); // Gets the established connection stream
 
-
-
             // ONLY: Setup Record and information IF connect button has been clicked/received.
 
             var buffer = new byte[1024];
@@ -53,19 +51,38 @@ class TcpServer
             // If connect request comes...
             if (msgFromClient == "Can i connect via UDP mayhaps?")
             {
-                // Allow connection (Yes button clicked)
-                var message = "Yeah, go ahead";
-                var connBuffer = Encoding.UTF8.GetBytes(message);
-                stream.Write(connBuffer, 0, connBuffer.Length);
 
-                // Send Config over stream
-                byte[] configBytes = JsonSerializer.SerializeToUtf8Bytes(ts.Data);
-                stream.Write(configBytes, 0, configBytes.Length);
+                // Allow connection (Yes button clicked)
+                var response = new HandshakeResponse
+                    {
+                        Accepted = true,
+                        Config   = ts.Data
+                    };
+                    byte[] responseBytes = JsonSerializer.SerializeToUtf8Bytes(response);
+                    stream.Write(responseBytes, 0, responseBytes.Length);
 
                 // BROADCAST BULLSHIT RAHHHHHHHH
 
                 var cts = new CancellationTokenSource();
-                UDPSender.Start(ts.Data, cts.Token);
+                var senderTask = Task.Run(() => UDPSender.Start(ts.Data, cts.Token));
+
+                try
+                {
+                    var disconnectBuffer = new byte[64];
+                    var disconnectLength = stream.Read(disconnectBuffer, 0, disconnectBuffer.Length); // Waits for disconnect call
+                    var msg = Encoding.UTF8.GetString(disconnectBuffer, 0, disconnectLength);
+                    Console.WriteLine($"Client said: {msg}");
+                }
+                catch (IOException)
+                {
+                    Console.WriteLine("Client dropped connection.");
+                }
+                finally
+                {
+                    Console.WriteLine("Cancelling FFmpeg...");
+                    cts.Cancel();
+                    senderTask.Wait();
+                }
 
             }
 

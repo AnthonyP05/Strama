@@ -41,7 +41,7 @@ public class UDPSender
             Console.WriteLine("Starting screen capture.");
             screen.Start();
 
-            ct.Register(() => { if (!screen.HasExited) screen.Kill(); });
+            ct.Register(() => { if (!screen.HasExited) screen.Kill(); Console.WriteLine("FFmpeg killed."); });
 
             screen.WaitForExit();
             Console.WriteLine("FFmpeg process exited.");

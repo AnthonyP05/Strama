@@ -1,20 +1,13 @@
-using Strama.Network;
-using System;
 using System.Diagnostics;
-using System.IO; // Added for File operations
-using System.Net;
-using System.Net.Sockets;
-using System.Text;
 using Strama.HS;
-using System.Threading.Tasks;
 
 public class UDPReceiver
 {
-    public static void StartListener(UdpHandshakeInfo data)
+    public static Task StartListener(UdpHandshakeInfo data)
     {
         Console.WriteLine($"Starting FFplay to listen for UDP stream on port {data.UdpPort}");   
         
-        Task.Run(() =>
+        return Task.Run(() =>
         {
             try
             {
@@ -26,7 +19,7 @@ c=IN IP4 {data.UdpIP}
 t=0 0
 a=tool:libavformat
 m=video {data.UdpPort} RTP/AVP 96
-a=rtpmap:96 H265/90000
+a=rtpmap:96 H264/90000
 a=fmtp:96 packetization-mode=1";
 
                 // 2. Save it to a temporary file
@@ -52,7 +45,7 @@ a=fmtp:96 packetization-mode=1";
                 screen.Start();
 
                 screen.WaitForExit();
-                Console.WriteLine("FFplay process exited.");
+                Console.WriteLine("FFplay exited.");
                 
                 // Optional: Clean up the file after ffplay exits
                 if (File.Exists(sdpFilePath))
