@@ -37,7 +37,6 @@ public class UDPSender
                 }
             };
 
-            screen.Start();
             ct.Register(() =>
             {
                 try
@@ -61,6 +60,8 @@ public class UDPSender
                 }
                 catch { }
             });
+
+            screen.Start();
             screen.WaitForExit();
 
         }
