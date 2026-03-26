@@ -3,11 +3,7 @@ using Strama.Network;
 using System.Net;
 using System.Diagnostics;
 using System.Net.Sockets;
-using System.Drawing;
 using Strama.HS;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
-
 
 public class UDPSender
 {
@@ -24,14 +20,15 @@ public class UDPSender
                     Arguments = $"-f gdigrab " +
                                 $"-framerate {data.Framerate} " +
                                 $"-offset_x 0 -offset_y 0 " + // Start at top left of primary screen
-                                $"-video_size 2560x1440 " +
+                                $"-video_size {data.CaptureWidth}x{data.CaptureHeight} " +
                                 $"-i desktop " + // Capture the entire desktop
-                                $"-vf scale={data.y_Resolution}:{data.x_Resolution} " + // Scales the full captured screen down
-                                $"-c:v libx265 " + 
+                                $"-vf scale={data.OutputWidth}:{data.OutputHeight} " +
+                                $"-c:v libx264 " + 
                                 $"-b:v 10M " +
                                 $"-bufsize 20M " +
                                 $"-tune zerolatency " + 
-                                //$"-crf 18 " + // Quality setting, lower is better quality (and higher bitrate)
+                                $"-g 30 " + // Keyframe every 30 frames
+                                $"-sc_threshold 0 " + // Turning off scene-cut
                                 $"-preset ultrafast " +
                                 $"-f rtp rtp://{data.UdpIP}:{data.UdpPort}",
                     
@@ -45,7 +42,6 @@ public class UDPSender
             screen.Start();
 
             ct.Register(() => { if (!screen.HasExited) screen.Kill(); });
-
 
             screen.WaitForExit();
             Console.WriteLine("FFmpeg process exited.");

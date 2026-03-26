@@ -1,9 +1,8 @@
 namespace Strama.Network;
 
-using System.ComponentModel;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Text;
-using Microsoft.VisualBasic;
 using Strama.HS;
 
 class TCPClient
@@ -49,23 +48,7 @@ class TCPClient
                     UDPReceiver.StartListener(config);
 
                 }
-
             }
-
-
-            /*
-            var message = Console.ReadLine();
-            if (message == "exit") break;
-
-            
-            var buffer = (!string.IsNullOrEmpty(message)) ? Encoding.UTF8.GetBytes(message) : Encoding.UTF8.GetBytes("err");
-            stream.Write(buffer, 0, buffer.Length);
-
-            var responseBuffer = new byte[1024];
-            var bytesRead = stream.Read(responseBuffer, 0, responseBuffer.Length);
-            var response = Encoding.UTF8.GetString(responseBuffer, 0, bytesRead);
-            Console.WriteLine($"Server Response: {response}");
-            */
         }
     }
 }

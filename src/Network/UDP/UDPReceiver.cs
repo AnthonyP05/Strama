@@ -39,8 +39,10 @@ a=fmtp:96 packetization-mode=1";
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = "ffplay",
-                        // 3. Pass the absolute path of the generated SDP file to ffplay
-                        Arguments = $"-protocol_whitelist file,rtp,udp -fflags nobuffer -flags low_delay -i \"{sdpFilePath}\"",
+                        Arguments = $"-protocol_whitelist file,rtp,udp " +
+                                    $"-probesize 32 -analyzeduration 0 " +
+                                    $"-fflags nobuffer -flags low_delay " +
+                                    $"-i \"{sdpFilePath}\"",
                         UseShellExecute = false,
                         // CreateNoWindow = false, 
                     }

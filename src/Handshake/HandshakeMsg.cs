@@ -13,10 +13,14 @@ public record UdpHandshakeInfo
 
     public IPAddress TcpIP { get; set; } = IPAddress.Parse("127.0.0.1");//IPAddress.Any;
 
-    public string y_Resolution { get; set; } = "720"; 
+    public string CaptureWidth  { get; set; } = "2560";
 
-    public string x_Resolution { get; set; } = "480";
+    public string CaptureHeight { get; set; } = "1440";
 
+    public string OutputWidth   { get; set; } = "1280";
+
+    public string OutputHeight  { get; set; } = "720";
+    
     public string EncodingType { get; set; } = "H.265";
 
     public int Framerate { get; set; } = 60;

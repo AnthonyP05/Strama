@@ -5,7 +5,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Strama.HS;
 
 class TcpServer
@@ -39,6 +38,8 @@ class TcpServer
 
             Console.WriteLine("TCP Client connected!");
 
+            client.ReceiveTimeout = 5000; // 5 second timeout to remove hanging connections
+
             var stream = client.GetStream(); // Gets the established connection stream
 
 
@@ -66,79 +67,7 @@ class TcpServer
                 var cts = new CancellationTokenSource();
                 UDPSender.Start(ts.Data, cts.Token);
 
-                // Setting UDP Information for Client
-                var record = new HS.UdpHandshakeInfo();
-
-
-                var psuedo_disconnect_button = false;
-
-                /*
-                // While the disconnect button hasn't been clicked
-                while(!psuedo_disconnect_button)
-                {   
-                    Console.WriteLine("Attempting to start UDP Server...");
-                    // Start UDP connection
-                    UDPSender.Start(ts.Data);
-                    
-                
-
-                }
-                */
-
-
-
-
-                // Don't allow connection (No button clicked)
-                /*
-                var message = "No, absolutely not";
-                var connBuffer = Encoding.UTF8.GetBytes(message);
-                stream.Write(connBuffer, 0, connBuffer.Length);
-
-
-
-                */
             }
-
-            
-
-
-            
-
-
-
-            
-
-            // Send UDP information 
-            // byte[] recordToBytes = JsonSerializer.SerializeToUtf8Bytes(record);
-            //stream.Write(recordToBytes, 0, recordToBytes.Length);
-
-
-            // Insert setting up the quality, type, etc.
-
-
-            // THEN initiate stream
-
-
-            /* 
-
-            Need something like this for UDP, where its constantly
-            Sending Video bytes
-
-            var buffer = new byte[1024];
-            int bytesRead;
-
-            // Read and print data
-            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) != 0)
-            {
-                // Gets message from Client
-                var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                Console.WriteLine($"Received: {message}");
-
-                // Writes message back to client. 
-                stream.Write(buffer, 0, bytesRead);
-                Console.WriteLine("Message echoed back.");
-            }
-            */
 
             client.Close();
             Console.WriteLine("Client disconnected.");
