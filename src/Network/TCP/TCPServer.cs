@@ -43,7 +43,6 @@ class TcpServer
             var stream = client.GetStream(); // Gets the established connection stream
 
             // ONLY: Setup Record and information IF connect button has been clicked/received.
-
             var buffer = new byte[1024];
             var bytesRead = stream.Read(buffer, 0, buffer.Length);
             var msgFromClient = Encoding.UTF8.GetString(buffer, 0, bytesRead);
@@ -61,6 +60,8 @@ class TcpServer
                     byte[] responseBytes = JsonSerializer.SerializeToUtf8Bytes(response);
                     stream.Write(responseBytes, 0, responseBytes.Length);
 
+                client.ReceiveTimeout = 0;
+
                 // BROADCAST BULLSHIT RAHHHHHHHH
 
                 var cts = new CancellationTokenSource();
@@ -72,6 +73,9 @@ class TcpServer
                     var disconnectLength = stream.Read(disconnectBuffer, 0, disconnectBuffer.Length); // Waits for disconnect call
                     var msg = Encoding.UTF8.GetString(disconnectBuffer, 0, disconnectLength);
                     Console.WriteLine($"Client said: {msg}");
+
+                    stream.Write(Encoding.UTF8.GetBytes("ok"), 0, 2);
+
                 }
                 catch (IOException)
                 {

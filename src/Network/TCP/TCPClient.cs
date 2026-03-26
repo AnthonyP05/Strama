@@ -45,6 +45,9 @@ class TCPClient
                     // Close UDP!
                     var bye = Encoding.UTF8.GetBytes("disconnect");
                     stream.Write(bye, 0, bye.Length);
+
+                    var ackBuf = new byte[16];
+                    try { stream.Read(ackBuf, 0, ackBuf.Length); } catch { }
                 }
 
                 break;

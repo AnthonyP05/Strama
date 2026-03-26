@@ -46,6 +46,7 @@ a=fmtp:96 packetization-mode=1";
 
                 screen.WaitForExit();
                 Console.WriteLine("FFplay exited.");
+                try { if (!screen.HasExited) screen.Kill(); } catch { }
                 
                 // Optional: Clean up the file after ffplay exits
                 if (File.Exists(sdpFilePath))

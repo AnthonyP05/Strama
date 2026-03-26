@@ -37,14 +37,31 @@ public class UDPSender
                 }
             };
 
-            // Starting screen capture
-            Console.WriteLine("Starting screen capture.");
             screen.Start();
-
-            ct.Register(() => { if (!screen.HasExited) screen.Kill(); Console.WriteLine("FFmpeg killed."); });
-
+            ct.Register(() =>
+            {
+                try
+                {
+                    if (!screen.HasExited)
+                    {
+                        // Kill entire process tree, not just the parent
+                        var killTree = new Process
+                        {
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = "taskkill",
+                                Arguments = $"/PID {screen.Id} /T /F",
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            }
+                        };
+                        killTree.Start();
+                        killTree.WaitForExit();
+                    }
+                }
+                catch { }
+            });
             screen.WaitForExit();
-            Console.WriteLine("FFmpeg process exited.");
 
         }
         catch (Exception e)
