@@ -57,7 +57,14 @@ class TcpServer
                 var connBuffer = Encoding.UTF8.GetBytes(message);
                 stream.Write(connBuffer, 0, connBuffer.Length);
 
+                // Send Config over stream
+                byte[] configBytes = JsonSerializer.SerializeToUtf8Bytes(ts.Data);
+                stream.Write(configBytes, 0, configBytes.Length);
+
                 // BROADCAST BULLSHIT RAHHHHHHHH
+
+                var cts = new CancellationTokenSource();
+                UDPSender.Start(ts.Data, cts.Token);
 
                 // Setting UDP Information for Client
                 var record = new HS.UdpHandshakeInfo();
@@ -65,6 +72,7 @@ class TcpServer
 
                 var psuedo_disconnect_button = false;
 
+                /*
                 // While the disconnect button hasn't been clicked
                 while(!psuedo_disconnect_button)
                 {   
@@ -75,6 +83,7 @@ class TcpServer
                 
 
                 }
+                */
 
 
 

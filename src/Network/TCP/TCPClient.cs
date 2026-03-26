@@ -41,10 +41,12 @@ class TCPClient
                 var response = Encoding.UTF8.GetString(responseBuffer, 0, bytesRead);
 
                 // Server said i can connect, yippie!
-                if (response == "Yead, go ahead")
+                if (response == "Yeah, go ahead")
                 {
-                    // Start UDP listening
-                    UDPReceiver.StartListener(tc.Data);
+                    var cfgBuf = new byte[4096];
+                    var cfgLen = stream.Read(cfgBuf, 0, cfgBuf.Length);
+                    var config = JsonSerializer.Deserialize<UdpHandshakeInfo>(cfgBuf.AsSpan(0, cfgLen))!;
+                    UDPReceiver.StartListener(config);
 
                 }
 
