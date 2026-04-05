@@ -1,0 +1,1 @@
+// DXGI Desktop Duplication API
