@@ -20,7 +20,10 @@ public record HandshakeConfig
     
     public string EncodingType { get; set; } = "H.264";
 
-    public int Framerate { get; set; } = 60;
+    public int Framerate { get; set; } = 9999;
+
+    // Target encode bitrate passed to ffmpeg -b:v. Examples: "10M", "5M", "50M"
+    public string Bitrate { get; set; } = "10M";
 
 }
 

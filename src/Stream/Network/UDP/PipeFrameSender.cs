@@ -42,7 +42,7 @@ public static class PipeFrameSender
                 // rawvideo on stdin replaces -f gdigrab -i desktop
                 Arguments = $"-f rawvideo -pix_fmt bgra -s {w}x{h} -r {data.Framerate} -i pipe:0 " +
                             $"-vf scale={data.OutputWidth}:{data.OutputHeight} " +
-                            $"-c:v libx264 -b:v 10M -bufsize 20M -tune zerolatency " +
+                            $"-c:v libx264 -b:v {data.Bitrate} -bufsize {data.Bitrate} -tune zerolatency " +
                             $"-g 30 -sc_threshold 0 -preset ultrafast " +
                             $"-f rtp rtp://{data.UdpIP}:{data.UdpPort}",
                 UseShellExecute       = false,
