@@ -18,12 +18,13 @@ public record HandshakeConfig
 
     public string OutputHeight  { get; set; } = "720";
     
-    public string EncodingType { get; set; } = "H.264";
-
-    public int Framerate { get; set; } = 9999;
+    public int Framerate { get; set; } = 150;
 
     // Target encode bitrate passed to ffmpeg -b:v. Examples: "10M", "5M", "50M"
     public string Bitrate { get; set; } = "10M";
+
+    // Encoder to use. Software: "libx264". AMD GPU: "h264_amf". Nvidia: "h264_nvenc". Intel: "h264_qsv"
+    public string Encoder { get; set; } = "libx264";
 
 }
 

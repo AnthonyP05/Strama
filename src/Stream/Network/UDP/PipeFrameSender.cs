@@ -32,18 +32,37 @@ public static class PipeFrameSender
         int w = firstFrame.Width;
         int h = firstFrame.Height;
 
-        Console.WriteLine($"[Capture] First frame: {w}x{h}");
+        Console.WriteLine($"[Capture] First frame: {w}x{h}, encoder: {data.Encoder}");
+
+        var encoderArgs = data.Encoder switch
+        {
+            // Software — CPU encode, good compatibility, slower at high fps
+            "libx264" => $"-c:v libx264 -b:v {data.Bitrate} -bufsize {data.Bitrate} " +
+                         $"-tune zerolatency -preset ultrafast -g 30 -sc_threshold 0",
+
+            // AMD GPU — low latency hardware encode, much faster, requires AMF drivers
+            "h264_amf" => $"-c:v h264_amf -b:v {data.Bitrate} " +
+                          $"-usage ultralowlatency -quality speed -rc cbr",
+
+            // Nvidia GPU
+            "h264_nvenc" => $"-c:v h264_nvenc -b:v {data.Bitrate} " +
+                            $"-preset p1 -tune ll -rc cbr",
+
+            // Intel GPU
+            "h264_qsv" => $"-c:v h264_qsv -b:v {data.Bitrate} " +
+                          $"-preset veryfast -low_delay 1",
+
+            _ => throw new ArgumentException($"Unknown encoder: {data.Encoder}")
+        };
 
         var proc = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName  = "ffmpeg",
-                // rawvideo on stdin replaces -f gdigrab -i desktop
                 Arguments = $"-f rawvideo -pix_fmt bgra -s {w}x{h} -r {data.Framerate} -i pipe:0 " +
                             $"-vf scale={data.OutputWidth}:{data.OutputHeight} " +
-                            $"-c:v libx264 -b:v {data.Bitrate} -bufsize {data.Bitrate} -tune zerolatency " +
-                            $"-g 30 -sc_threshold 0 -preset ultrafast " +
+                            $"{encoderArgs} " +
                             $"-f rtp rtp://{data.UdpIP}:{data.UdpPort}",
                 UseShellExecute       = false,
                 RedirectStandardInput = true,
