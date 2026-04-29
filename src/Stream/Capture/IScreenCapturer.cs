@@ -1,9 +1,17 @@
-/*
+using Strama.Records;
 
-IScreenCapturer → pipes raw BGRA 
-frames to FFmpeg stdin (-f rawvideo -pix_fmt bgra -i pipe:0). 
-FFmpeg still handles encode + RTP streaming for now.
+namespace Strama.Capture;
 
-*/
-
-// interface + CapturedFrame type
+/// <summary>
+/// Captures raw BGRA frames from the local display.
+/// Implementations are platform-specific; use <see cref="ScreenCapturerFactory"/> to get one.
+/// </summary>
+public interface IScreenCapturer : IDisposable
+{
+    /// <summary>
+    /// Returns the next changed frame, or null if no new frame appeared within
+    /// <paramref name="timeoutMs"/>. Throws if the session is lost (lock screen, UAC, etc.)
+    /// — the caller should dispose and recreate the capturer.
+    /// </summary>
+    FrameData? CaptureFrame(int timeoutMs = 100);
+}

@@ -18,7 +18,7 @@ public record HandshakeConfig
 
     public string OutputHeight  { get; set; } = "720";
     
-    public string EncodingType { get; set; } = "H.265";
+    public string EncodingType { get; set; } = "H.264";
 
     public int Framerate { get; set; } = 60;
 
