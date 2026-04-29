@@ -13,6 +13,15 @@ public static class PipeFrameSender
 {
     public static async Task StartAsync(HandshakeConfig data, CancellationToken ct)
     {
+        try
+        {
+            await RunAsync(data, ct);
+        }
+        catch (OperationCanceledException) { /* clean shutdown when CT fires */ }
+    }
+
+    private static async Task RunAsync(HandshakeConfig data, CancellationToken ct)
+    {
         using var capturer = ScreenCapturerFactory.Create();
         using var session  = new CaptureSession(capturer);
         var captureTask = Task.Run(() => session.Run(ct), ct);
