@@ -65,7 +65,7 @@ class TcpServer
                 // BROADCAST BULLSHIT RAHHHHHHHH
 
                 var cts = new CancellationTokenSource();
-                var senderTask = Task.Run(() => UDPSender.Start(ts.Data, cts.Token));
+                var senderTask = PipeFrameSender.StartAsync(ts.Data, cts.Token);
 
                 try
                 {

@@ -20,6 +20,22 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 
     public ChannelReader<FrameData> Frames => _channel.Reader;
 
+    // Runs once the first time FFmpegFrameDecoder is used.
+    // Sets the DLL search path and activates all FFmpeg function pointers.
+    // Without Initialize(), every ffmpeg.* call throws NotSupportedException.
+    static FFmpegFrameDecoder()
+    {
+        // Override via FFMPEG_ROOT env var, or place the DLLs next to the exe.
+        // Download "release full shared" from https://www.gyan.dev/ffmpeg/builds/
+        // and copy avcodec-60.dll, avformat-60.dll, avutil-58.dll,
+        //          swscale-7.dll, swresample-4.dll into bin/Debug/net8.0/
+        if (string.IsNullOrEmpty(ffmpeg.RootPath))
+            ffmpeg.RootPath = Environment.GetEnvironmentVariable("FFMPEG_ROOT")
+                           ?? AppContext.BaseDirectory;
+
+        DynamicallyLoadedBindings.Initialize();
+    }
+
     /// <param name="sdpPath">Path to the .sdp file describing the RTP stream.</param>
     /// <param name="capacity">Max frames queued before old ones are dropped.</param>
     public FFmpegFrameDecoder(string sdpPath, int capacity = 2)
