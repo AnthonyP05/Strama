@@ -171,7 +171,7 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
             swsCtx,
             w, h, (AVPixelFormat)frame->format,
             w, h, AVPixelFormat.AV_PIX_FMT_BGRA,
-            ffmpeg.SWS_BILINEAR, null, null, null);
+            2 /* SWS_BILINEAR */, null, null, null);
 
         if (swsCtx == null) return;
 
