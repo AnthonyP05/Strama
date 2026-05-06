@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using Strama.Records;
 using Vortice.Direct3D;
@@ -118,7 +119,12 @@ public class DxgiScreenCapturer : IScreenCapturer
         {
             int width  = (int)_stagingTexture.Description.Width;
             int height = (int)_stagingTexture.Description.Height;
-            var pixels = new byte[width * height * 4]; // 4 bytes per pixel (BGRA)
+
+            // Rent a buffer from the pool instead of allocating a new array every frame.
+            // ArrayPool.Rent may return a larger buffer than requested — that's fine,
+            // because all reads/writes use explicit width*height*4 bounds, not pixels.Length.
+            int size   = width * height * 4;
+            var pixels = ArrayPool<byte>.Shared.Rent(size);
 
             // RowPitch is the number of bytes per row as laid out in GPU memory.
             // It is often larger than width * 4 due to alignment padding.
@@ -132,7 +138,7 @@ public class DxgiScreenCapturer : IScreenCapturer
                     length:      width * 4);
             }
 
-            return new FrameData(pixels, width, height);
+            return new FrameData(pixels, width, height, pooled: true);
         }
         finally
         {

@@ -36,6 +36,8 @@ public class UDPReceiver
                     frameCount = 0;
                     sw.Restart();
                 }
+
+                frame.Dispose();
             }
 
             await decodeTask;

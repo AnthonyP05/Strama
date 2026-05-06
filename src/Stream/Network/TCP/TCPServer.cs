@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Strama.Encode;
 using Strama.Records;
 
 class TcpServer
@@ -65,7 +66,11 @@ class TcpServer
                 // BROADCAST BULLSHIT RAHHHHHHHH
 
                 var cts = new CancellationTokenSource();
-                var senderTask = PipeFrameSender.StartAsync(ts.Data, cts.Token);
+                var senderTask = Task.Run(() =>
+                {
+                    using var encoder = new RtpFrameEncoder(ts.Data);
+                    encoder.Run(cts.Token);
+                });
 
                 try
                 {
@@ -83,7 +88,7 @@ class TcpServer
                 }
                 finally
                 {
-                    Console.WriteLine("Cancelling FFmpeg...");
+                    Console.WriteLine("Stopping encoder...");
                     cts.Cancel();
                     senderTask.Wait();
                 }

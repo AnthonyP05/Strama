@@ -1,7 +1,27 @@
+using System.Buffers;
+
 namespace Strama.Records;
 
-/// <summary>
-/// A single captured frame: raw BGRA pixel data and its dimensions.
-/// BGRA = 4 bytes per pixel, row-major, no padding.
-/// </summary>
-public readonly record struct FrameData(byte[] Pixels, int Width, int Height);
+public readonly struct FrameData : IDisposable
+{
+    public byte[] Pixels { get; }
+    public int    Width  { get; }
+    public int    Height { get; }
+
+    // True when Pixels was rented from ArrayPool<byte>.Shared.
+    private readonly bool _pooled;
+
+    public FrameData(byte[] pixels, int width, int height, bool pooled = false)
+    {
+        Pixels  = pixels;
+        Width   = width;
+        Height  = height;
+        _pooled = pooled;
+    }
+
+    public void Dispose()
+    {
+        if (_pooled)
+            ArrayPool<byte>.Shared.Return(Pixels);
+    }
+}
