@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using FFmpeg.AutoGen;
@@ -139,11 +140,15 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             packet = ffmpeg.av_packet_alloc();
             if (packet == null) throw new OutOfMemoryException("av_packet_alloc failed");
 
-            long pts = 0;
+            long pts        = 0;
+            int  frameCount = 0;
+            long byteCount  = 0;
+            var  sw         = Stopwatch.StartNew();
 
             // Encode the first frame we already read.
-            EncodeFrame(first, srcW, srcH, codecCtx, yuvFrame, packet, fmtCtx, stream, swsCtx, ref pts);
+            byteCount += EncodeFrame(first, srcW, srcH, codecCtx, yuvFrame, packet, fmtCtx, stream, swsCtx, ref pts);
             first.Dispose();
+            frameCount++;
 
             while (!ct.IsCancellationRequested)
             {
@@ -154,8 +159,18 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 }
                 catch (OperationCanceledException) { break; }
 
-                EncodeFrame(frame, srcW, srcH, codecCtx, yuvFrame, packet, fmtCtx, stream, swsCtx, ref pts);
+                byteCount += EncodeFrame(frame, srcW, srcH, codecCtx, yuvFrame, packet, fmtCtx, stream, swsCtx, ref pts);
                 frame.Dispose();
+                frameCount++;
+
+                if (sw.ElapsedMilliseconds >= 1000)
+                {
+                    double kbps = byteCount * 8.0 / 1000.0;
+                    Console.WriteLine($"[Encode] {frameCount} fps  {kbps:F0} kbps  {dstW}x{dstH}");
+                    frameCount = 0;
+                    byteCount  = 0;
+                    sw.Restart();
+                }
             }
 
             // Flush the encoder: send null frame to drain any buffered packets.
@@ -184,7 +199,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         }
     }
 
-    private static void EncodeFrame(
+    private static long EncodeFrame(
         FrameData src, int srcW, int srcH,
         AVCodecContext* codecCtx, AVFrame* yuvFrame, AVPacket* packet,
         AVFormatContext* fmtCtx, AVStream* stream, SwsContext* swsCtx,
@@ -203,17 +218,20 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         yuvFrame->pts = pts++;
 
         // Send the frame into the encoder. Negative return = encoder busy, skip.
-        if (ffmpeg.avcodec_send_frame(codecCtx, yuvFrame) < 0) return;
+        if (ffmpeg.avcodec_send_frame(codecCtx, yuvFrame) < 0) return 0;
 
+        long bytes = 0;
         // A single frame can produce multiple packets (especially at keyframes).
         while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
         {
+            bytes += packet->size;
             packet->stream_index = stream->index;
             // Rescale PTS/DTS from codec timebase to stream timebase before muxing.
             ffmpeg.av_packet_rescale_ts(packet, codecCtx->time_base, stream->time_base);
             ffmpeg.av_interleaved_write_frame(fmtCtx, packet);
             ffmpeg.av_packet_unref(packet);
         }
+        return bytes;
     }
 
     private static void AddEncoderOptions(string encoder, AVDictionary** opts)
