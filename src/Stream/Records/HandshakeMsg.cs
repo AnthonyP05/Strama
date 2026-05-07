@@ -24,7 +24,7 @@ public record HandshakeConfig
     public string Bitrate { get; set; } = "10M";
 
     // Encoder to use. Software: "libx264". AMD GPU: "h264_amf". Nvidia: "h264_nvenc". Intel: "h264_qsv"
-    public string Encoder { get; set; } =  "libx264";
+    public string Encoder { get; set; } =  "h264_amf";// "libx264";
 
 }
 

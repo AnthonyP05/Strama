@@ -208,6 +208,10 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 
             var hwDevCtx   = (AVHWDeviceContext*)hwDevBuf->data;
             var d3d11HwCtx = (AVD3D11VADeviceContext*)hwDevCtx->hwctx;
+            // FFmpeg's d3d11va_device_uninit calls Release() on both pointers.
+            // AddRef here so our Vortice wrappers remain valid after FFmpeg frees its context.
+            Marshal.AddRef(d3dDevice.NativePointer);
+            Marshal.AddRef(d3dCtx.NativePointer);
             d3d11HwCtx->device         = (FFmpeg.AutoGen.ID3D11Device*)d3dDevice.NativePointer.ToPointer();
             d3d11HwCtx->device_context = (FFmpeg.AutoGen.ID3D11DeviceContext*)d3dCtx.NativePointer.ToPointer();
 
@@ -243,7 +247,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             codecCtx->time_base     = new AVRational { num = 1, den = _config.Framerate };
             codecCtx->framerate     = new AVRational { num = _config.Framerate, den = 1 };
             codecCtx->bit_rate      = ParseBitrate(_config.Bitrate);
-            codecCtx->gop_size      = 30;
+            codecCtx->gop_size      = _config.Framerate / 2;  // IDR every ~0.5 s → inline SPS/PPS
             codecCtx->flags        |= ffmpeg.AV_CODEC_FLAG_LOW_DELAY;
             codecCtx->hw_device_ctx = ffmpeg.av_buffer_ref(hwDevBuf);
             codecCtx->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
@@ -473,7 +477,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             codecCtx->time_base = new AVRational { num = 1, den = _config.Framerate };
             codecCtx->framerate = new AVRational { num = _config.Framerate, den = 1 };
             codecCtx->bit_rate  = ParseBitrate(_config.Bitrate);
-            codecCtx->gop_size  = 30;
+            codecCtx->gop_size  = _config.Framerate / 2;  // IDR every ~0.5 s → inline SPS/PPS
             codecCtx->flags    |= ffmpeg.AV_CODEC_FLAG_LOW_DELAY;
 
             AVDictionary* encOpts = null;
