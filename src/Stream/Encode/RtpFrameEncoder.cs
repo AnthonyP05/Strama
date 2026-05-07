@@ -406,6 +406,8 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 {
                     while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
                     {
+                        if ((packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0)
+                            Console.WriteLine($"[Encode] IDR sent: size={packet->size}");
                         byteCount           += packet->size;
                         packet->stream_index = rtpStream->index;
                         ffmpeg.av_packet_rescale_ts(packet, codecCtx->time_base, rtpStream->time_base);

@@ -136,14 +136,22 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
                 if (packet->stream_index == videoIdx)
                 {
                     bool isKey = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
-                    if (isKey) keyCount++;
 
-                    if (pktCount < 10 || isKey)
+                    // Walk the annexb NAL units to see what's actually in this packet.
+                    // NAL types: 1=non-IDR slice, 5=IDR slice, 7=SPS, 8=PPS, 9=AUD.
+                    var nalTypes = ScanNalTypes(packet->data, packet->size);
+                    bool hasIdr = nalTypes.Contains(5);
+                    bool hasSps = nalTypes.Contains(7);
+                    bool hasPps = nalTypes.Contains(8);
+                    if (hasIdr) keyCount++;
+
+                    if (pktCount < 10 || hasIdr || hasSps)
                     {
-                        Console.Write($"[Decode] pkt#{pktCount} size={packet->size} key={isKey} data[0..8]=");
-                        for (int i = 0; i < Math.Min(8, packet->size); i++)
-                            Console.Write($"{packet->data[i]:X2} ");
-                        Console.WriteLine();
+                        Console.WriteLine($"[Decode] pkt#{pktCount} size={packet->size} key={isKey} " +
+                                          $"NALs=[{string.Join(",", nalTypes)}]" +
+                                          (hasIdr ? " <IDR>" : "") +
+                                          (hasSps ? " <SPS>" : "") +
+                                          (hasPps ? " <PPS>" : ""));
                     }
                     pktCount++;
                     int decoded = Decode(codecCtx, frame, packet, ref swsCtx);
@@ -245,6 +253,28 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
         var buf = stackalloc byte[256];
         ffmpeg.av_strerror(code, buf, 256);
         return Marshal.PtrToStringAnsi((nint)buf) ?? $"error {code}";
+    }
+
+    // Walk an annexb-formatted buffer and return the NAL types it contains.
+    // Start codes are 00 00 00 01 or 00 00 01; the byte after the start code
+    // holds the NAL header — its low 5 bits are the NAL unit type.
+    private static List<int> ScanNalTypes(byte* data, int size)
+    {
+        var types = new List<int>();
+        int i = 0;
+        while (i + 3 < size)
+        {
+            int hdr;
+            if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 0 && data[i + 3] == 1)
+                hdr = i + 4;
+            else if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1)
+                hdr = i + 3;
+            else { i++; continue; }
+
+            if (hdr < size) types.Add(data[hdr] & 0x1F);
+            i = hdr + 1;
+        }
+        return types;
     }
 
     public void Dispose() { /* all resources are freed in Run's finally block */ }
