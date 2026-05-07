@@ -1,0 +1,95 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Strama.UI.ViewModels"
+             x:DataType="vm:SettingsViewModel"
+             x:Class="Strama.UI.Views.SettingsView">
+
+    <Border Background="{DynamicResource SemiColorBackground0}"
+            BorderBrush="{DynamicResource SemiColorBorder}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="32"
+            Width="520"
+            BoxShadow="0 8 24 0 #40000000">
+
+        <StackPanel Spacing="20">
+
+            <TextBlock Text="Settings"
+                       FontSize="20"
+                       FontWeight="SemiBold" />
+
+            <!-- Bitrate -->
+            <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="Bitrate" />
+                    <TextBlock Grid.Column="1" Opacity="0.7">
+                        <Run Text="{Binding BitrateMbps}" />
+                        <Run Text=" Mbps" />
+                    </TextBlock>
+                </Grid>
+                <Slider Minimum="1" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
+                        Value="{Binding BitrateMbps}" />
+                <TextBlock Text="Cap on outgoing stream when you're hosting."
+                           FontSize="11" Opacity="0.55" />
+            </StackPanel>
+
+            <!-- FPS -->
+            <StackPanel Spacing="6">
+                <TextBlock Text="Frame rate" />
+                <ComboBox ItemsSource="{Binding FpsOptions}"
+                          SelectedItem="{Binding SelectedFps}"
+                          HorizontalAlignment="Stretch" />
+                <TextBlock Text="Higher FPS uses more CPU/GPU and bandwidth."
+                           FontSize="11" Opacity="0.55" />
+            </StackPanel>
+
+            <!-- Resolution -->
+            <StackPanel Spacing="6">
+                <TextBlock Text="Resolution" />
+                <ComboBox ItemsSource="{Binding ResolutionOptions}"
+                          SelectedItem="{Binding SelectedResolution}"
+                          IsEnabled="{Binding IsResolutionEnabled}"
+                          HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ResolutionOpt">
+                            <TextBlock Text="{Binding Label}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="{Binding ResolutionLockedHint}"
+                           FontSize="11"
+                           Opacity="0.7"
+                           Foreground="{DynamicResource SemiColorWarning}"
+                           IsVisible="{Binding !IsResolutionEnabled}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- Encoder -->
+            <StackPanel Spacing="6">
+                <TextBlock Text="Encoder" />
+                <ComboBox ItemsSource="{Binding EncoderOptions}"
+                          SelectedItem="{Binding SelectedEncoder}"
+                          HorizontalAlignment="Stretch" />
+                <TextBlock Text="auto picks the fastest available; libx264 is the cross-platform CPU fallback."
+                           FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- Buttons -->
+            <Grid ColumnDefinitions="*,12,*" Margin="0,8,0,0">
+                <Button Grid.Column="0"
+                        Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" />
+                <Button Grid.Column="2"
+                        Content="Save"
+                        Command="{Binding SaveCommand}"
+                        Classes="Primary"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" />
+            </Grid>
+
+        </StackPanel>
+    </Border>
+
+</UserControl>

@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Strama.UI.ViewModels"
+             x:DataType="vm:HostingViewModel"
+             x:Class="Strama.UI.Views.HostingView">
+
+    <Grid RowDefinitions="*,Auto" Margin="32">
+        <StackPanel Grid.Row="0" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16" Width="500">
+            <TextBlock Text="🖥️" FontSize="48" HorizontalAlignment="Center" />
+            <TextBlock TextWrapping="Wrap" FontSize="16" HorizontalAlignment="Center" TextAlignment="Center">
+                <Run Text="Sharing your screen with " />
+                <Run Text="{Binding PeerLabel}" FontFamily="Cascadia Code,Consolas,Menlo,monospace" FontWeight="SemiBold" />
+            </TextBlock>
+            <TextBlock Text="{Binding StatsText}"
+                       FontSize="13"
+                       Opacity="0.7"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <Button Grid.Row="1"
+                Content="Disconnect"
+                Command="{Binding DisconnectCommand}"
+                HorizontalAlignment="Center"
+                Margin="0,0,0,16" />
+    </Grid>
+
+</UserControl>

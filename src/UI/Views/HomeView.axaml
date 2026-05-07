@@ -1,0 +1,88 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:Strama.UI.ViewModels"
+             mc:Ignorable="d"
+             x:DataType="vm:HomeViewModel"
+             x:Class="Strama.UI.Views.HomeView">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="32">
+
+        <!-- Top row: your code -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,0,0,32">
+            <TextBlock Grid.Column="0"
+                       Text="Your code"
+                       FontSize="14"
+                       Opacity="0.7"
+                       VerticalAlignment="Center"
+                       Margin="0,0,16,0" />
+
+            <Border Grid.Column="1"
+                    Background="{DynamicResource SemiColorPrimaryLightDefault}"
+                    Padding="16,8"
+                    CornerRadius="6">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="{Binding LocalCode}"
+                               FontFamily="Cascadia Code,Consolas,Menlo,monospace"
+                               FontSize="22"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <Button Content="Copy"
+                            Command="{Binding CopyCodeCommand}"
+                            ToolTip.Tip="Copy code to clipboard"
+                            VerticalAlignment="Center"
+                            Padding="8,4"
+                            FontSize="12" />
+                </StackPanel>
+            </Border>
+
+            <Button Grid.Column="3"
+                    Content="⚙"
+                    FontSize="18"
+                    Width="40" Height="40"
+                    Padding="0"
+                    HorizontalContentAlignment="Center"
+                    VerticalContentAlignment="Center"
+                    ToolTip.Tip="Settings"
+                    Command="{Binding OpenSettingsCommand}" />
+        </Grid>
+
+        <!-- Center: connect to + error banner -->
+        <StackPanel Grid.Row="1"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    Width="420"
+                    Spacing="12">
+            <TextBlock Text="Connect to a peer"
+                       FontSize="16"
+                       Opacity="0.85" />
+            <TextBox Text="{Binding ConnectInput}"
+                     Watermark="192.168.1.42  or  192.168.1.42:8888"
+                     FontSize="15" />
+            <Button Content="Connect"
+                    Command="{Binding ConnectCommand}"
+                    HorizontalAlignment="Stretch"
+                    Classes="Primary" />
+
+            <Border IsVisible="{Binding ErrorBanner, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    Background="{DynamicResource SemiColorDangerLightDefault}"
+                    Padding="12,8"
+                    CornerRadius="4"
+                    Margin="0,8,0,0">
+                <TextBlock Text="{Binding ErrorBanner}"
+                           Foreground="{DynamicResource SemiColorDanger}"
+                           TextWrapping="Wrap" />
+            </Border>
+        </StackPanel>
+
+        <!-- Bottom: status line -->
+        <TextBlock Grid.Row="2"
+                   Text="{Binding StatusText}"
+                   FontSize="12"
+                   Opacity="0.6"
+                   Margin="0,16,0,0" />
+
+    </Grid>
+
+</UserControl>

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- Exe (not WinExe) so the console window stays available during development for FFmpeg/encoder logs and the console-debug mode. Switch to WinExe once we are ready to ship a clean release build. -->
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
@@ -9,11 +10,34 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Strama</RootNamespace>
     <AssemblyName>Strama</AssemblyName>
-    <StartupObject>Strama.Network.TcpServer</StartupObject>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
+  <!-- archive/ holds the legacy console-Main wrappers (TCPClient, TCPServer,
+       UDPSender, PipeFrameSender). They're kept for reference but excluded from
+       the build. -->
   <ItemGroup>
-    <PackageReference Include="FFMpegCore" Version="5.4.0" />
+    <Compile Remove="archive/**" />
+    <None Include="archive/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="src/UI/Assets/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.2.1">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+      <Condition>'$(Configuration)' == 'Debug'</Condition>
+    </PackageReference>
+    <PackageReference Include="Semi.Avalonia" Version="11.2.1.4" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.0.0" />
     <PackageReference Include="System.Text.Json" Version="10.0.5" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />

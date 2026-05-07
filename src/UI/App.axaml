@@ -1,0 +1,36 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:semi="https://irihi.tech/semi"
+             xmlns:vm="using:Strama.UI.ViewModels"
+             xmlns:views="using:Strama.UI.Views"
+             x:Class="Strama.App"
+             RequestedThemeVariant="Dark">
+
+    <Application.DataTemplates>
+        <!-- Map ViewModel types to their corresponding UserControl Views.
+             Avalonia uses these whenever a ContentControl is bound to a VM instance. -->
+        <DataTemplate DataType="{x:Type vm:HomeViewModel}">
+            <views:HomeView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ConnectingViewModel}">
+            <views:ConnectingView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:IncomingRequestViewModel}">
+            <views:IncomingRequestView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:HostingViewModel}">
+            <views:HostingView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ViewingViewModel}">
+            <views:ViewingView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+            <views:SettingsView />
+        </DataTemplate>
+    </Application.DataTemplates>
+
+    <Application.Styles>
+        <semi:SemiTheme Locale="en-US" />
+    </Application.Styles>
+
+</Application>

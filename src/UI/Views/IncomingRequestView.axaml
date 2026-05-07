@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Strama.UI.ViewModels"
+             x:DataType="vm:IncomingRequestViewModel"
+             x:Class="Strama.UI.Views.IncomingRequestView">
+
+    <Border Background="{DynamicResource SemiColorBackground0}"
+            BorderBrush="{DynamicResource SemiColorBorder}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="32"
+            Width="440"
+            BoxShadow="0 8 24 0 #40000000">
+        <StackPanel Spacing="20">
+            <TextBlock Text="Incoming view request"
+                       FontSize="18"
+                       FontWeight="SemiBold" />
+            <TextBlock TextWrapping="Wrap" FontSize="14">
+                <Run Text="A peer at " />
+                <Run Text="{Binding PeerLabel}" FontFamily="Cascadia Code,Consolas,Menlo,monospace" FontWeight="SemiBold" />
+                <Run Text=" wants to view your screen." />
+            </TextBlock>
+            <TextBlock FontSize="12" Opacity="0.6">
+                <Run Text="Auto-denies in " />
+                <Run Text="{Binding SecondsRemaining}" />
+                <Run Text=" seconds." />
+            </TextBlock>
+
+            <Grid ColumnDefinitions="*,12,*" Margin="0,16,0,0">
+                <Button Grid.Column="0"
+                        Content="Deny"
+                        Command="{Binding DenyCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" />
+                <Button Grid.Column="2"
+                        Content="Allow"
+                        Command="{Binding AllowCommand}"
+                        Classes="Primary"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" />
+            </Grid>
+        </StackPanel>
+    </Border>
+
+</UserControl>
