@@ -371,6 +371,12 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             long byteCount  = 0;
             var  sw         = Stopwatch.StartNew();
 
+            // Manual IDR cadence — every `idrEvery` frames we tag the input as I-type so
+            // the encoder produces a fresh IDR. Needed because h264_amf ignores gop_size
+            // under usage=ultralowlatency.
+            int idrEvery   = Math.Max(1, codecCtx->gop_size);
+            int sinceIdr   = 0;
+
             while (!ct.IsCancellationRequested)
             {
                 var acquireResult = duplication.AcquireNextFrame(100, out _, out var desktopResource);
@@ -401,6 +407,17 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 hwFrame->height        = srcH;
                 hwFrame->pts           = pts++;
                 hwFrame->buf[0]        = ffmpeg.av_buffer_alloc(1);
+
+                if (sinceIdr >= idrEvery)
+                {
+                    hwFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                    sinceIdr           = 0;
+                }
+                else
+                {
+                    hwFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                }
+                sinceIdr++;
 
                 if (ffmpeg.avcodec_send_frame(codecCtx, hwFrame) >= 0)
                 {
@@ -648,9 +665,13 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 ffmpeg.av_dict_set(opts, "preset", "ultrafast",   0);
                 break;
             case "h264_amf":
-                ffmpeg.av_dict_set(opts, "usage",   "ultralowlatency", 0);
-                ffmpeg.av_dict_set(opts, "quality", "speed",           0);
-                ffmpeg.av_dict_set(opts, "rc",      "cbr",             0);
+                ffmpeg.av_dict_set(opts, "usage",      "ultralowlatency", 0);
+                ffmpeg.av_dict_set(opts, "quality",    "speed",           0);
+                ffmpeg.av_dict_set(opts, "rc",         "cbr",             0);
+                // h264_amf with usage=ultralowlatency ignores gop_size — IDRs only get
+                // produced for the very first frame. forced_idr=1 makes I-frames promote
+                // to IDR frames (with inline SPS/PPS) when we set pict_type below.
+                ffmpeg.av_dict_set(opts, "forced_idr", "1",               0);
                 break;
             case "h264_nvenc":
                 ffmpeg.av_dict_set(opts, "preset", "p1",  0);
