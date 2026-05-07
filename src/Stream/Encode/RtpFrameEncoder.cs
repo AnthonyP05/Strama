@@ -311,6 +311,26 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             }
             if (ct.IsCancellationRequested) return;
 
+            // Diagnose: show what the encoder produced during priming
+            {
+                Console.Write($"[Encode] Primed: extradata={codecCtx->extradata_size}B");
+                if (codecCtx->extradata_size > 0)
+                {
+                    Console.Write(" extradata[0..4]=");
+                    for (int i = 0; i < Math.Min(4, codecCtx->extradata_size); i++)
+                        Console.Write($"{codecCtx->extradata[i]:X2} ");
+                }
+                Console.WriteLine($"  buffered={bufferedPackets.Count} pkt(s)");
+                if (bufferedPackets.Count > 0)
+                {
+                    var p0 = (AVPacket*)bufferedPackets[0];
+                    Console.Write($"[Encode] First pkt: size={p0->size} flags={p0->flags:X} data[0..8]=");
+                    for (int i = 0; i < Math.Min(8, p0->size); i++)
+                        Console.Write($"{p0->data[i]:X2} ");
+                    Console.WriteLine();
+                }
+            }
+
             // ── RTP output (opened after extradata is populated) ──────────────
             string url = $"rtp://{_config.UdpIP}:{_config.UdpPort}";
 

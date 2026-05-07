@@ -113,13 +113,28 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
             if (frame == null || packet == null)
                 throw new OutOfMemoryException("FFmpeg frame/packet alloc failed.");
 
+            int pktCount = 0;
             while (!ct.IsCancellationRequested)
             {
                 ret = ffmpeg.av_read_frame(fmtCtx, packet);
-                if (ret < 0) break; // EOF or network closed
+                if (ret < 0)
+                {
+                    Console.WriteLine($"[Decode] av_read_frame ended after {pktCount} pkts: {AvError(ret)}");
+                    break;
+                }
 
                 if (packet->stream_index == videoIdx)
+                {
+                    if (pktCount < 5)
+                    {
+                        Console.Write($"[Decode] pkt#{pktCount} size={packet->size} flags={packet->flags:X} data[0..8]=");
+                        for (int i = 0; i < Math.Min(8, packet->size); i++)
+                            Console.Write($"{packet->data[i]:X2} ");
+                        Console.WriteLine();
+                    }
+                    pktCount++;
                     Decode(codecCtx, frame, packet, ref swsCtx);
+                }
 
                 ffmpeg.av_packet_unref(packet);
             }
@@ -145,16 +160,17 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 
     private void Decode(AVCodecContext* codecCtx, AVFrame* frame, AVPacket* packet, ref SwsContext* swsCtx)
     {
-        // Send the compressed packet into the decoder. A negative return means the
-        // packet was malformed — skip it rather than aborting the whole stream.
-        if (ffmpeg.avcodec_send_packet(codecCtx, packet) < 0) return;
+        int sendRet = ffmpeg.avcodec_send_packet(codecCtx, packet);
+        if (sendRet < 0)
+        {
+            Console.WriteLine($"[Decode] avcodec_send_packet failed: {AvError(sendRet)}");
+            return;
+        }
 
-        // One packet can produce multiple decoded frames (e.g. after a flush).
-        // avcodec_receive_frame returns 0 while frames are available.
         while (ffmpeg.avcodec_receive_frame(codecCtx, frame) == 0)
         {
             EmitFrame(frame, ref swsCtx);
-            ffmpeg.av_frame_unref(frame); // release the frame's buffer back to the pool
+            ffmpeg.av_frame_unref(frame);
         }
     }
 
