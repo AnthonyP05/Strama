@@ -55,6 +55,7 @@ public sealed class ConnectionManager : IDisposable
     private TcpClient?         _sessionTcp;
     private RtpFrameEncoder?   _encoder;
     private Task?              _encodeTask;
+    private int                _tearingDown;     // Interlocked flag — guards against double-teardown
 
     public ConnectionState State { get; private set; } = ConnectionState.Idle;
     public IPEndPoint?     LocalEndPoint { get; private set; }
@@ -172,30 +173,41 @@ public sealed class ConnectionManager : IDisposable
     }
 
     /// <summary>Cleanly tears down whatever session is active.</summary>
-    public void Disconnect()
+    public void Disconnect() => _ = TearDownSessionAsync(reason: null, sendDisconnectMessage: true);
+
+    // Single source of truth for session cleanup. Both monitor tasks and the
+    // user-initiated Disconnect() funnel through here, and the Interlocked flag
+    // guarantees the body runs once even if multiple paths fire concurrently.
+    private async Task TearDownSessionAsync(string? reason, bool sendDisconnectMessage)
     {
-        Task.Run(async () =>
+        if (Interlocked.Exchange(ref _tearingDown, 1) == 1) return;
+
+        try
         {
-            try
+            // Viewer-initiated disconnect: politely tell the host first. Best
+            // effort — if the socket is already half-closed we just continue.
+            if (sendDisconnectMessage && State == ConnectionState.Viewing && _sessionTcp is not null)
             {
-                if (State == ConnectionState.Viewing && _sessionTcp is not null)
-                {
-                    try { await HandshakeProtocol.SendDisconnectAsync(_sessionTcp.GetStream()); } catch { }
-                }
-                _sessionCts?.Cancel();
-                if (_encodeTask is not null) { try { await _encodeTask; } catch { } }
-                _sessionTcp?.Dispose();
-                _sessionTcp = null;
-                _encoder    = null;
-                _encodeTask = null;
-                SetState(ConnectionState.Idle);
-                SessionEnded?.Invoke(null);
+                try { await HandshakeProtocol.SendDisconnectAsync(_sessionTcp.GetStream()); } catch { }
             }
-            catch (Exception ex)
-            {
-                ErrorOccurred?.Invoke($"Disconnect error: {ex.Message}");
-            }
-        });
+
+            _sessionCts?.Cancel();
+            if (_encodeTask is not null) { try { await _encodeTask; } catch { } }
+            _sessionTcp?.Dispose();
+            _sessionTcp = null;
+            _encoder    = null;
+            _encodeTask = null;
+            SetState(ConnectionState.Idle);
+            SessionEnded?.Invoke(reason);
+        }
+        catch (Exception ex)
+        {
+            ErrorOccurred?.Invoke($"Teardown error: {ex.Message}");
+        }
+        finally
+        {
+            _tearingDown = 0;
+        }
     }
 
     // ─── Internals ────────────────────────────────────────────────────────────
@@ -291,44 +303,38 @@ public sealed class ConnectionManager : IDisposable
     {
         try
         {
+            // Block until the viewer either sends "disconnect" or closes its
+            // socket (returns empty string in that case).
             var msg = await HandshakeProtocol.WaitForDisconnectAsync(tcp.GetStream());
-            _sessionCts?.Cancel();
-            if (_encodeTask is not null) { try { await _encodeTask; } catch { } }
-
             if (msg == "disconnect")
             {
                 try { await HandshakeProtocol.AckDisconnectAsync(tcp.GetStream()); } catch { }
             }
+        }
+        catch { /* socket aborted — proceed to teardown */ }
 
-            tcp.Dispose();
-            _sessionTcp = null;
-            _encoder    = null;
-            _encodeTask = null;
-            SetState(ConnectionState.Idle);
-            SessionEnded?.Invoke(null);
-        }
-        catch (Exception ex)
-        {
-            ErrorOccurred?.Invoke($"Host session error: {ex.Message}");
-            SetState(ConnectionState.Idle);
-        }
+        await TearDownSessionAsync(reason: null, sendDisconnectMessage: false);
     }
 
     private async Task MonitorViewerSessionAsync(TcpClient tcp, Task decoderRunning)
     {
+        // Race the decoder finishing against the host closing its TCP socket.
+        // Without this the viewer would stay in ViewingView indefinitely when
+        // the host clicks Disconnect: the host's TCP closes, but UDP just goes
+        // silent, so the decoder never errors out and the UI never hears about it.
+        var tcpClosed = Task.Run(async () =>
+        {
+            try { await HandshakeProtocol.WaitForDisconnectAsync(tcp.GetStream()); }
+            catch { /* socket aborted is fine — same outcome */ }
+        });
+
         try
         {
-            await decoderRunning;
-            tcp.Dispose();
-            _sessionTcp = null;
-            SetState(ConnectionState.Idle);
-            SessionEnded?.Invoke(null);
+            await Task.WhenAny(decoderRunning, tcpClosed);
         }
-        catch (Exception ex)
-        {
-            ErrorOccurred?.Invoke($"Viewer session error: {ex.Message}");
-            SetState(ConnectionState.Idle);
-        }
+        catch { /* swallowed — the teardown below covers cleanup */ }
+
+        await TearDownSessionAsync(reason: null, sendDisconnectMessage: false);
     }
 
     private void SetState(ConnectionState next)
