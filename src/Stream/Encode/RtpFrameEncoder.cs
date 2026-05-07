@@ -50,6 +50,12 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
     {
         try { RunCapture(ct); }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Encode] Fatal: {ex.GetType().Name}: {ex.Message}");
+            if (ex.InnerException != null)
+                Console.WriteLine($"[Encode]        {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+        }
     }
 
     private void RunCapture(CancellationToken ct)
@@ -129,6 +135,10 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         AVBufferRef*     hwDevBuf    = null;
         AVBufferRef*     hwFramesBuf = null;
 
+        // Packets from the priming phase (encoded before the muxer is open).
+        // Freed in the finally if an exception prevents them from being written.
+        var bufferedPackets = new List<nint>();
+
         try
         {
             // ── D3D11 + DXGI ──────────────────────────────────────────────────
@@ -196,10 +206,10 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             hwDevBuf = ffmpeg.av_hwdevice_ctx_alloc(AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA);
             if (hwDevBuf == null) throw new InvalidOperationException("av_hwdevice_ctx_alloc failed");
 
-            var hwDevCtx    = (AVHWDeviceContext*)hwDevBuf->data;
-            var d3d11HwCtx  = (AVD3D11VADeviceContext*)hwDevCtx->hwctx;
-            d3d11HwCtx->device          = (FFmpeg.AutoGen.ID3D11Device*)d3dDevice.NativePointer.ToPointer();
-            d3d11HwCtx->device_context  = (FFmpeg.AutoGen.ID3D11DeviceContext*)d3dCtx.NativePointer.ToPointer();
+            var hwDevCtx   = (AVHWDeviceContext*)hwDevBuf->data;
+            var d3d11HwCtx = (AVD3D11VADeviceContext*)hwDevCtx->hwctx;
+            d3d11HwCtx->device         = (FFmpeg.AutoGen.ID3D11Device*)d3dDevice.NativePointer.ToPointer();
+            d3d11HwCtx->device_context = (FFmpeg.AutoGen.ID3D11DeviceContext*)d3dCtx.NativePointer.ToPointer();
 
             int ret = ffmpeg.av_hwdevice_ctx_init(hwDevBuf);
             if (ret < 0) ThrowFfmpegError("av_hwdevice_ctx_init", ret);
@@ -244,7 +254,60 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             ffmpeg.av_dict_free(&encOpts);
             if (ret < 0) ThrowFfmpegError("avcodec_open2", ret);
 
-            // ── RTP output ────────────────────────────────────────────────────
+            packet = ffmpeg.av_packet_alloc();
+            if (packet == null) throw new OutOfMemoryException("av_packet_alloc failed");
+
+            // ── Priming: encode until the first packet arrives ────────────────
+            // Hardware encoders (AMF, NVENC) only populate codecCtx->extradata
+            // (SPS/PPS) after the first successful encode call. We must have
+            // extradata before avformat_write_header so the decoder receives the
+            // stream parameters it needs to start decoding.
+            long pts    = 0;
+            int  texIdx = 0;
+
+            while (bufferedPackets.Count == 0 && !ct.IsCancellationRequested)
+            {
+                var primeResult = duplication.AcquireNextFrame(100, out _, out var primeRes);
+                if (primeResult == Vortice.DXGI.ResultCode.WaitTimeout) continue;
+                primeResult.CheckError();
+
+                var primeTex    = texPool[texIdx];
+                var primeTexPtr = (byte*)primeTex.NativePointer.ToPointer();
+                texIdx = (texIdx + 1) % PoolSize;
+
+                using (primeRes)
+                {
+                    using var dxgiTex = primeRes.QueryInterface<D3D11Tex2D>();
+                    d3dCtx.CopyResource(primeTex, dxgiTex);
+                }
+                duplication.ReleaseFrame().CheckError();
+
+                var primeFrame = ffmpeg.av_frame_alloc();
+                if (primeFrame == null) continue;
+
+                primeFrame->format        = (int)AVPixelFormat.AV_PIX_FMT_D3D11;
+                primeFrame->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
+                primeFrame->data[0]       = primeTexPtr;
+                primeFrame->data[1]       = (byte*)(nuint)0;
+                primeFrame->width         = srcW;
+                primeFrame->height        = srcH;
+                primeFrame->pts           = pts++;
+                primeFrame->buf[0]        = ffmpeg.av_buffer_alloc(1);
+
+                if (ffmpeg.avcodec_send_frame(codecCtx, primeFrame) >= 0)
+                {
+                    while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
+                    {
+                        var clone = ffmpeg.av_packet_clone(packet);
+                        if (clone != null) bufferedPackets.Add((nint)clone);
+                        ffmpeg.av_packet_unref(packet);
+                    }
+                }
+                ffmpeg.av_frame_free(&primeFrame);
+            }
+            if (ct.IsCancellationRequested) return;
+
+            // ── RTP output (opened after extradata is populated) ──────────────
             string url = $"rtp://{_config.UdpIP}:{_config.UdpPort}";
 
             AVFormatContext* fmtCtxTmp = null;
@@ -268,14 +331,20 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             ret = ffmpeg.avformat_write_header(fmtCtx, null);
             if (ret < 0) ThrowFfmpegError("avformat_write_header", ret);
 
-            packet = ffmpeg.av_packet_alloc();
-            if (packet == null) throw new OutOfMemoryException("av_packet_alloc failed");
+            // Write packets buffered during priming
+            foreach (var pPtr in bufferedPackets)
+            {
+                var p = (AVPacket*)pPtr;
+                p->stream_index = rtpStream->index;
+                ffmpeg.av_packet_rescale_ts(p, codecCtx->time_base, rtpStream->time_base);
+                ffmpeg.av_interleaved_write_frame(fmtCtx, p);
+                ffmpeg.av_packet_free(&p);
+            }
+            bufferedPackets.Clear();
 
             // ── Encode loop ───────────────────────────────────────────────────
-            long pts        = 0;
             int  frameCount = 0;
             long byteCount  = 0;
-            int  texIdx     = 0;
             var  sw         = Stopwatch.StartNew();
 
             while (!ct.IsCancellationRequested)
@@ -293,28 +362,21 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 using (desktopResource)
                 {
                     using var dxgiTex = desktopResource.QueryInterface<D3D11Tex2D>();
-                    // GPU-to-GPU copy: DXGI texture → our intermediate texture.
-                    // Both textures are on the same device, so this stays on the GPU.
                     d3dCtx.CopyResource(interTex, dxgiTex);
                 }
                 duplication.ReleaseFrame().CheckError();
 
-                // Wrap the intermediate texture as an AVFrame.
-                // buf[0] is set to a noop-free AVBuffer so FFmpeg's reference counting
-                // considers the frame valid without trying to free data[0] (our texture).
                 var hwFrame = ffmpeg.av_frame_alloc();
                 if (hwFrame == null) continue;
 
                 hwFrame->format        = (int)AVPixelFormat.AV_PIX_FMT_D3D11;
                 hwFrame->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
                 hwFrame->data[0]       = interTexPtr;
-                hwFrame->data[1]       = (byte*)(nuint)0;  // subresource index 0
+                hwFrame->data[1]       = (byte*)(nuint)0;
                 hwFrame->width         = srcW;
                 hwFrame->height        = srcH;
                 hwFrame->pts           = pts++;
-                // A 1-byte owned buffer makes the frame reference-counted so FFmpeg can
-                // safely ref/unref it. It doesn't affect data[0] (our texture pointer).
-                hwFrame->buf[0] = ffmpeg.av_buffer_alloc(1);
+                hwFrame->buf[0]        = ffmpeg.av_buffer_alloc(1);
 
                 if (ffmpeg.avcodec_send_frame(codecCtx, hwFrame) >= 0)
                 {
@@ -353,6 +415,11 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         }
         finally
         {
+            foreach (var pPtr in bufferedPackets)
+            {
+                var p = (AVPacket*)pPtr;
+                ffmpeg.av_packet_free(&p);
+            }
             if (texPool != null) foreach (var t in texPool) t?.Dispose();
             if (hwDevBuf    != null) { var b = hwDevBuf;    ffmpeg.av_buffer_unref(&b); }
             if (hwFramesBuf != null) { var b = hwFramesBuf; ffmpeg.av_buffer_unref(&b); }
