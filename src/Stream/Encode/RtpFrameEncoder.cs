@@ -31,7 +31,7 @@ internal unsafe struct ID3D11DeviceContext_ { }
 ///   "h264_amf"  — AMD GPU (D3D11 zero-copy path, no CPU involvement)
 ///   "h264_nvenc"— NVIDIA GPU (D3D11 zero-copy path)
 ///   "libx264"   — software CPU fallback
-/// </summary>
+/// </summary> 
 public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 {
     private readonly HandshakeConfig _config;
