@@ -113,27 +113,47 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
             if (frame == null || packet == null)
                 throw new OutOfMemoryException("FFmpeg frame/packet alloc failed.");
 
-            int pktCount = 0;
+            Console.WriteLine($"[Decode] Codec: {System.Runtime.InteropServices.Marshal.PtrToStringAnsi((nint)codec->name)}" +
+                              $"  extradata={codecCtx->extradata_size}B" +
+                              $"  w={codecCtx->width} h={codecCtx->height}");
+
+            int pktCount   = 0;
+            int frameCount = 0;
+            int keyCount   = 0;
+            var statTimer  = System.Diagnostics.Stopwatch.StartNew();
             while (!ct.IsCancellationRequested)
             {
                 ret = ffmpeg.av_read_frame(fmtCtx, packet);
                 if (ret < 0)
                 {
-                    Console.WriteLine($"[Decode] av_read_frame ended after {pktCount} pkts: {AvError(ret)}");
+                    Console.WriteLine($"[Decode] av_read_frame ended after {pktCount} pkts / {frameCount} frames: {AvError(ret)}");
                     break;
                 }
 
                 if (packet->stream_index == videoIdx)
                 {
-                    if (pktCount < 5)
+                    bool isKey = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
+                    if (isKey) keyCount++;
+
+                    if (pktCount < 10 || isKey)
                     {
-                        Console.Write($"[Decode] pkt#{pktCount} size={packet->size} flags={packet->flags:X} data[0..8]=");
+                        Console.Write($"[Decode] pkt#{pktCount} size={packet->size} key={isKey} data[0..8]=");
                         for (int i = 0; i < Math.Min(8, packet->size); i++)
                             Console.Write($"{packet->data[i]:X2} ");
                         Console.WriteLine();
                     }
                     pktCount++;
-                    Decode(codecCtx, frame, packet, ref swsCtx);
+                    int decoded = Decode(codecCtx, frame, packet, ref swsCtx);
+                    frameCount += decoded;
+                    if (decoded > 0 && frameCount <= 3)
+                        Console.WriteLine($"[Decode] First decoded frame #{frameCount}  fmt={frame->format}  {frame->width}x{frame->height}");
+                }
+
+                // Periodic summary: shows whether packets arrive but frames don't decode.
+                if (statTimer.ElapsedMilliseconds >= 3000)
+                {
+                    Console.WriteLine($"[Decode] stats: {pktCount} pkts  {keyCount} key  {frameCount} decoded");
+                    statTimer.Restart();
                 }
 
                 ffmpeg.av_packet_unref(packet);
@@ -158,20 +178,36 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
         }
     }
 
-    private void Decode(AVCodecContext* codecCtx, AVFrame* frame, AVPacket* packet, ref SwsContext* swsCtx)
+    private int Decode(AVCodecContext* codecCtx, AVFrame* frame, AVPacket* packet, ref SwsContext* swsCtx)
     {
         int sendRet = ffmpeg.avcodec_send_packet(codecCtx, packet);
         if (sendRet < 0)
         {
             Console.WriteLine($"[Decode] avcodec_send_packet failed: {AvError(sendRet)}");
-            return;
+            return 0;
         }
 
-        while (ffmpeg.avcodec_receive_frame(codecCtx, frame) == 0)
+        int count = 0;
+        while (true)
         {
-            EmitFrame(frame, ref swsCtx);
-            ffmpeg.av_frame_unref(frame);
+            int recvRet = ffmpeg.avcodec_receive_frame(codecCtx, frame);
+            if (recvRet == 0)
+            {
+                EmitFrame(frame, ref swsCtx);
+                ffmpeg.av_frame_unref(frame);
+                count++;
+                continue;
+            }
+            // AVERROR(EAGAIN)=-11 (need more input) and AVERROR_EOF are both normal; log everything else.
+            if (recvRet != ffmpeg.AVERROR_EOF)
+            {
+                string msg = AvError(recvRet);
+                if (!msg.Contains("again", StringComparison.OrdinalIgnoreCase))
+                    Console.WriteLine($"[Decode] receive_frame error: {msg} ({recvRet})");
+            }
+            break;
         }
+        return count;
     }
 
     private void EmitFrame(AVFrame* frame, ref SwsContext* swsCtx)
