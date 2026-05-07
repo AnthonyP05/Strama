@@ -70,6 +70,9 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
             ffmpeg.av_dict_set(&opts, "protocol_whitelist", "file,rtp,udp", 0);
             ffmpeg.av_dict_set(&opts, "probesize",          "32",           0);
             ffmpeg.av_dict_set(&opts, "analyzeduration",    "0",            0);
+            // 10 MB socket receive buffer — without this the kernel drops fragments of large IDR
+            // frames (~200 KB each, split into ~143 UDP datagrams) before the app reads them.
+            ffmpeg.av_dict_set(&opts, "buffer_size",        "10485760",     0);
 
             int ret = ffmpeg.avformat_open_input(&fmtCtx, _sdpPath, null, &opts);
             ffmpeg.av_dict_free(&opts);
@@ -198,13 +201,11 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
                 count++;
                 continue;
             }
-            // AVERROR(EAGAIN)=-11 (need more input) and AVERROR_EOF are both normal; log everything else.
-            if (recvRet != ffmpeg.AVERROR_EOF)
-            {
-                string msg = AvError(recvRet);
-                if (!msg.Contains("again", StringComparison.OrdinalIgnoreCase))
-                    Console.WriteLine($"[Decode] receive_frame error: {msg} ({recvRet})");
-            }
+            // -11 = AVERROR(EAGAIN): decoder needs more packets before it can output a frame.
+            // This is normal — it will keep returning EAGAIN until it receives an IDR keyframe.
+            // AVERROR_EOF is also normal (stream ended). Log everything else as a real error.
+            if (recvRet != -11 && recvRet != ffmpeg.AVERROR_EOF)
+                Console.WriteLine($"[Decode] receive_frame error: {AvError(recvRet)} ({recvRet})");
             break;
         }
         return count;
