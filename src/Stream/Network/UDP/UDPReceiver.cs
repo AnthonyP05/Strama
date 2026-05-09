@@ -6,7 +6,7 @@ namespace Strama.Network;
 
 public static class UDPReceiver
 {
-    public sealed record Session(Task Running, ChannelReader<FrameData> Frames);
+    public sealed record Session(Task Running, ChannelReader<FrameData> Frames, Func<long> GetTotalNetworkBytes);
 
     /// <summary>
     /// Writes the SDP file describing the incoming RTP stream and starts the
@@ -24,7 +24,7 @@ public static class UDPReceiver
         var decoder    = new FFmpegFrameDecoder(sdpPath);
         var decodeTask = Task.Run(() => decoder.Run(ct), ct);
 
-        return new Session(decodeTask, decoder.Frames);
+        return new Session(decodeTask, decoder.Frames, () => decoder.TotalBytesReceived);
     }
 
     private static string WriteSdp(HandshakeConfig data)

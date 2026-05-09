@@ -17,8 +17,12 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 {
     private readonly string _sdpPath;
     private readonly Channel<FrameData> _channel;
+    private long _totalBytesReceived;
 
     public ChannelReader<FrameData> Frames => _channel.Reader;
+
+    /// <summary>Cumulative encoded bytes received from the network. Thread-safe.</summary>
+    public long TotalBytesReceived => Interlocked.Read(ref _totalBytesReceived);
 
     // Runs once the first time FFmpegFrameDecoder is used.
     // Sets the DLL search path and activates all FFmpeg function pointers.
@@ -135,6 +139,7 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 
                 if (packet->stream_index == videoIdx)
                 {
+                    Interlocked.Add(ref _totalBytesReceived, packet->size);
                     bool isKey = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
 
                     // Walk the annexb NAL units to see what's actually in this packet.

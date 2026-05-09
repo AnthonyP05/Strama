@@ -22,7 +22,8 @@ public sealed record IncomingRequest(IPEndPoint PeerEndPoint, DateTime ReceivedA
 
 public sealed record StreamHandle(
     ChannelReader<FrameData> Frames,
-    HandshakeConfig Config);
+    HandshakeConfig Config,
+    Func<long> GetTotalNetworkBytes);
 
 /// <summary>
 /// Owns the entire connection lifecycle. There is exactly one of these per
@@ -61,12 +62,12 @@ public sealed class ConnectionManager : IDisposable
     public IPEndPoint?     LocalEndPoint { get; private set; }
     public string          LocalCode     { get; private set; } = "—";
 
-    public event Action<ConnectionState>? StateChanged;
-    public event Action<IncomingRequest>? IncomingRequestReceived;
-    public event Action<IPEndPoint>?      HostSessionStarted;  // host side, after accept + encoder up
-    public event Action<StreamHandle>?    StreamStarted;       // viewer side, once decoder is up
-    public event Action<string?>?         SessionEnded;        // string is the reason or null
-    public event Action<string>?          ErrorOccurred;
+    public event Action<ConnectionState>?      StateChanged;
+    public event Action<IncomingRequest>?      IncomingRequestReceived;
+    public event Action<IPEndPoint, string>?   HostSessionStarted;  // (viewerEp, resolvedEncoder)
+    public event Action<StreamHandle>?         StreamStarted;       // viewer side, once decoder is up
+    public event Action<string?>?              SessionEnded;        // string is the reason or null
+    public event Action<string>?               ErrorOccurred;
 
     public ConnectionManager(
         IPeerResolver resolver,
@@ -86,10 +87,23 @@ public sealed class ConnectionManager : IDisposable
         lock (_gate)
         {
             if (_listener != null) return;
-            _listener = new TcpListener(IPAddress.Any, _tcpPort);
-            _listener.Start();
+            int port = _tcpPort;
+            while (true)
+            {
+                try
+                {
+                    _listener = new TcpListener(IPAddress.Any, port);
+                    _listener.Start();
+                    break;
+                }
+                catch (SocketException)
+                {
+                    _listener = null;
+                    port++;
+                }
+            }
             LocalEndPoint = (IPEndPoint)_listener.LocalEndpoint;
-            LocalCode     = _resolver.LocalCode(new IPEndPoint(NetworkUtilities.GetLocalIPv4(), _tcpPort));
+            LocalCode     = _resolver.LocalCode(new IPEndPoint(NetworkUtilities.GetLocalIPv4(), port));
             _listenerCts  = new CancellationTokenSource();
         }
         _ = Task.Run(() => AcceptLoopAsync(_listenerCts!.Token));
@@ -120,9 +134,10 @@ public sealed class ConnectionManager : IDisposable
 
         SetState(ConnectionState.AwaitingRemoteAccept);
         HandshakeResponse resp;
+        int udpPort = FindFreeUdpPort();
         try
         {
-            resp = await HandshakeProtocol.RequestAsync(tcp, _udpPort, ct);
+            resp = await HandshakeProtocol.RequestAsync(tcp, udpPort, ct);
         }
         catch (Exception ex)
         {
@@ -147,7 +162,7 @@ public sealed class ConnectionManager : IDisposable
         _sessionTcp = tcp;
 
         SetState(ConnectionState.Viewing);
-        StreamStarted?.Invoke(new StreamHandle(session.Frames, resp.Config));
+        StreamStarted?.Invoke(new StreamHandle(session.Frames, resp.Config, session.GetTotalNetworkBytes));
 
         _ = MonitorViewerSessionAsync(tcp, session.Running);
     }
@@ -210,6 +225,17 @@ public sealed class ConnectionManager : IDisposable
         }
     }
 
+    // Binds a UDP socket to port 0 to let the OS pick a free port, then reads
+    // back the assigned port. Using a fresh port each session prevents the stuck
+    // decoder from a prior session (blocked in av_read_frame) from blocking the
+    // OS bind for the new session's receive socket.
+    private static int FindFreeUdpPort()
+    {
+        using var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        s.Bind(new IPEndPoint(IPAddress.Any, 0));
+        return ((IPEndPoint)s.LocalEndPoint!).Port;
+    }
+
     // ─── Internals ────────────────────────────────────────────────────────────
 
     private async Task AcceptLoopAsync(CancellationToken ct)
@@ -247,6 +273,10 @@ public sealed class ConnectionManager : IDisposable
             // changes apply to fresh sessions without needing a manager rebuild.
             var template = _hostTemplateProvider();
             template.TcpPort = _tcpPort;
+            // Resolve "auto" to the actual encoder name now so the viewer receives
+            // the real codec string in the handshake config, and the host UI can
+            // show it immediately without waiting for the encode loop to start.
+            template.Encoder = RtpFrameEncoder.ResolveEncoder(template.Encoder);
             var effective = await HandshakeProtocol.AcceptAsync(
                 tcp,
                 approveAsync: peer =>
@@ -287,7 +317,7 @@ public sealed class ConnectionManager : IDisposable
 
             var viewerEp = (IPEndPoint)tcp.Client.RemoteEndPoint!;
             SetState(ConnectionState.Hosting);
-            HostSessionStarted?.Invoke(viewerEp);
+            HostSessionStarted?.Invoke(viewerEp, effective.Encoder);
 
             _ = MonitorHostSessionAsync(tcp);
         }

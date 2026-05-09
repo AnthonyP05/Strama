@@ -11,6 +11,11 @@
                 <Run Text="Sharing your screen with " />
                 <Run Text="{Binding PeerLabel}" FontFamily="Cascadia Code,Consolas,Menlo,monospace" FontWeight="SemiBold" />
             </TextBlock>
+            <TextBlock Text="{Binding EncoderLabel}"
+                       FontSize="13"
+                       Opacity="0.7"
+                       HorizontalAlignment="Center"
+                       FontFamily="Cascadia Code,Consolas,Menlo,monospace" />
             <TextBlock Text="{Binding StatsText}"
                        FontSize="13"
                        Opacity="0.7"

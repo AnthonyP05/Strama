@@ -31,6 +31,15 @@
                     <Run Text="{Binding Renderer.LastFps}" />
                     <Run Text=" fps" />
                 </TextBlock>
+                <TextBlock Foreground="White" FontSize="12" Opacity="0.65" Text="·" />
+                <TextBlock Foreground="White" FontSize="12" FontWeight="SemiBold"
+                           Text="{Binding LiveBitrateLabel}" />
+                <TextBlock Foreground="White" FontSize="12" Opacity="0.65" Text="·" />
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Foreground="White" FontSize="12" Opacity="0.65" Text="avg" />
+                    <TextBlock Foreground="White" FontSize="12" Opacity="0.85"
+                               Text="{Binding AvgBitrateLabel}" />
+                </StackPanel>
             </StackPanel>
         </Border>
 

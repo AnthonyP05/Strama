@@ -87,9 +87,9 @@ public sealed partial class MainViewModel : ViewModelBase
         IncomingRequest = new IncomingRequestViewModel(_conn, req.PeerEndPoint);
     });
 
-    private void OnHostSessionStarted(System.Net.IPEndPoint viewer) => Post(() =>
+    private void OnHostSessionStarted(System.Net.IPEndPoint viewer, string encoder) => Post(() =>
     {
-        CurrentView     = new HostingViewModel(_conn, viewer);
+        CurrentView     = new HostingViewModel(_conn, viewer, encoder);
         IncomingRequest = null;
     });
 

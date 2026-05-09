@@ -86,6 +86,12 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         }
     }
 
+    /// <summary>
+    /// Resolves "auto" to the best available encoder, or validates a named encoder
+    /// with a libx264 fallback. Safe to call before starting a session.
+    /// </summary>
+    public static string ResolveEncoder(string configured) => DetectEncoder(configured);
+
     // Returns the encoder name to use.
     // "auto" probes in priority order; anything else is used as-is with a fallback
     // if the codec isn't present in this FFmpeg build.
@@ -491,11 +497,13 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 
         try
         {
-            var first = frames.ReadAsync(ct).AsTask().GetAwaiter().GetResult();
-            int srcW  = first.Width;
-            int srcH  = first.Height;
-            int dstW  = int.Parse(_config.OutputWidth);
-            int dstH  = int.Parse(_config.OutputHeight);
+            var first   = frames.ReadAsync(ct).AsTask().GetAwaiter().GetResult();
+            int srcW    = first.Width;
+            int srcH    = first.Height;
+            int parsedW = int.TryParse(_config.OutputWidth,  out var pw) ? pw : 0;
+            int parsedH = int.TryParse(_config.OutputHeight, out var ph) ? ph : 0;
+            int dstW    = parsedW > 0 ? parsedW : srcW;
+            int dstH    = parsedH > 0 ? parsedH : srcH;
 
             Console.WriteLine($"[Encode] {srcW}x{srcH} → {dstW}x{dstH}, encoder={_config.Encoder}");
 
