@@ -30,6 +30,7 @@ public sealed partial class MainViewModel : ViewModelBase
         conn.StateChanged            += OnStateChanged;
         conn.IncomingRequestReceived += OnIncomingRequest;
         conn.HostSessionStarted      += OnHostSessionStarted;
+        conn.HostEncoderResolved     += OnHostEncoderResolved;
         conn.StreamStarted           += OnStreamStarted;
         conn.SessionEnded            += OnSessionEnded;
         conn.ErrorOccurred           += msg => Post(() => _homeVm.ErrorBanner = msg);
@@ -91,6 +92,13 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         CurrentView     = new HostingViewModel(_conn, viewer, encoder);
         IncomingRequest = null;
+    });
+
+    // Encoder picks its actual codec ("auto" → "h264_amf" etc.) shortly after
+    // Run() starts. Update the live HostingViewModel if it's still on screen.
+    private void OnHostEncoderResolved(string encoder) => Post(() =>
+    {
+        if (CurrentView is HostingViewModel hvm) hvm.EncoderLabel = encoder;
     });
 
     private void OnStreamStarted(StreamHandle handle) => Post(() =>

@@ -46,6 +46,14 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 
     public RtpFrameEncoder(HandshakeConfig config) => _config = config;
 
+    /// <summary>
+    /// Fires once at the start of <see cref="Run"/> with the actual encoder name
+    /// FFmpeg picked. For "auto" this resolves to the real codec ("h264_amf",
+    /// "libx264", etc.); for an explicit name it confirms availability or reports
+    /// the libx264 fallback. Subscribe BEFORE calling Run.
+    /// </summary>
+    public event Action<string>? EncoderResolved;
+
     public void Run(CancellationToken ct = default)
     {
         try { RunCapture(ct); }
@@ -64,6 +72,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         bool   isGpu   = encoder is "h264_amf" or "h264_nvenc" or "h264_qsv";
 
         Console.WriteLine($"[Encode] Mode: {(isGpu ? "GPU" : "CPU")} ({encoder})");
+        EncoderResolved?.Invoke(encoder);
 
         if (isGpu && RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {

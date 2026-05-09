@@ -64,9 +64,10 @@ public sealed class ConnectionManager : IDisposable
 
     public event Action<ConnectionState>?      StateChanged;
     public event Action<IncomingRequest>?      IncomingRequestReceived;
-    public event Action<IPEndPoint, string>?   HostSessionStarted;  // (viewerEp, resolvedEncoder)
-    public event Action<StreamHandle>?         StreamStarted;       // viewer side, once decoder is up
-    public event Action<string?>?              SessionEnded;        // string is the reason or null
+    public event Action<IPEndPoint, string>?   HostSessionStarted;     // (viewerEp, configuredEncoder — may be "auto")
+    public event Action<string>?               HostEncoderResolved;    // fired once the encoder picks the actual codec
+    public event Action<StreamHandle>?         StreamStarted;          // viewer side, once decoder is up
+    public event Action<string?>?              SessionEnded;           // string is the reason or null
     public event Action<string>?               ErrorOccurred;
 
     public ConnectionManager(
@@ -273,10 +274,6 @@ public sealed class ConnectionManager : IDisposable
             // changes apply to fresh sessions without needing a manager rebuild.
             var template = _hostTemplateProvider();
             template.TcpPort = _tcpPort;
-            // Resolve "auto" to the actual encoder name now so the viewer receives
-            // the real codec string in the handshake config, and the host UI can
-            // show it immediately without waiting for the encode loop to start.
-            template.Encoder = RtpFrameEncoder.ResolveEncoder(template.Encoder);
             var effective = await HandshakeProtocol.AcceptAsync(
                 tcp,
                 approveAsync: peer =>
@@ -312,6 +309,9 @@ public sealed class ConnectionManager : IDisposable
             // can wait for the requester's "disconnect".
             _sessionCts = new CancellationTokenSource();
             _encoder    = new RtpFrameEncoder(effective);
+            // Wire up BEFORE starting — Run() fires this almost immediately, and
+            // we don't want to miss the only emission for this session.
+            _encoder.EncoderResolved += OnEncoderResolved;
             _encodeTask = Task.Run(() => _encoder.Run(_sessionCts.Token));
             _sessionTcp = tcp;
 
@@ -366,6 +366,8 @@ public sealed class ConnectionManager : IDisposable
 
         await TearDownSessionAsync(reason: null, sendDisconnectMessage: false);
     }
+
+    private void OnEncoderResolved(string encoder) => HostEncoderResolved?.Invoke(encoder);
 
     private void SetState(ConnectionState next)
     {
