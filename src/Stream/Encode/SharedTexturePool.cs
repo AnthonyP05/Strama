@@ -113,23 +113,70 @@ internal sealed class SharedTexturePool : IDisposable
         var encoderMtx = new IDXGIKeyedMutex[poolSize];
         var handles    = new IntPtr[poolSize];
 
+        Console.WriteLine($"[Pool] Creating shared pool {width}x{height} format={format} on display device");
         using var encoderDevice1 = encoderDevice.QueryInterface<ID3D11Device1>();
+        Console.WriteLine("[Pool] Got ID3D11Device1 on encoder device");
 
         for (int i = 0; i < poolSize; i++)
         {
-            displayTex[i] = displayDevice.CreateTexture2D(sharedDesc);
+            try
+            {
+                displayTex[i] = displayDevice.CreateTexture2D(sharedDesc);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"CreateTexture2D failed for shared texture {i} (format={format}, size={width}x{height})", ex);
+            }
 
-            using var resource1 = displayTex[i].QueryInterface<IDXGIResource1>();
-            handles[i] = resource1.CreateSharedHandle(
-                null,
-                Vortice.DXGI.SharedResourceFlags.Read | Vortice.DXGI.SharedResourceFlags.Write,
-                null);
+            IDXGIResource1 resource1;
+            try
+            {
+                resource1 = displayTex[i].QueryInterface<IDXGIResource1>();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"QueryInterface<IDXGIResource1> failed for shared texture {i}", ex);
+            }
 
-            encoderTex[i] = encoderDevice1.OpenSharedResource1<ID3D11Texture2D>(handles[i]);
+            try
+            {
+                handles[i] = resource1.CreateSharedHandle(
+                    null,
+                    Vortice.DXGI.SharedResourceFlags.Read | Vortice.DXGI.SharedResourceFlags.Write,
+                    null);
+            }
+            catch (Exception ex)
+            {
+                resource1.Dispose();
+                throw new InvalidOperationException(
+                    $"CreateSharedHandle failed for shared texture {i}", ex);
+            }
+            resource1.Dispose();
 
-            displayMtx[i] = displayTex[i].QueryInterface<IDXGIKeyedMutex>();
-            encoderMtx[i] = encoderTex[i].QueryInterface<IDXGIKeyedMutex>();
+            try
+            {
+                encoderTex[i] = encoderDevice1.OpenSharedResource1<ID3D11Texture2D>(handles[i]);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"OpenSharedResource1 failed for shared texture {i} (handle=0x{handles[i].ToInt64():X})", ex);
+            }
+
+            try
+            {
+                displayMtx[i] = displayTex[i].QueryInterface<IDXGIKeyedMutex>();
+                encoderMtx[i] = encoderTex[i].QueryInterface<IDXGIKeyedMutex>();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"QueryInterface<IDXGIKeyedMutex> failed for shared texture {i}", ex);
+            }
         }
+        Console.WriteLine($"[Pool] Successfully created {poolSize} shared cross-adapter textures");
 
         return new SharedTexturePool(true, displayTex, encoderTex, displayMtx, encoderMtx, handles);
     }

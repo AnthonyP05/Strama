@@ -53,6 +53,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         catch (Exception ex)
         {
             Console.WriteLine($"[Encode] Fatal: {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[Encode] Stack:\n{ex.StackTrace}");
             if (ex.InnerException != null)
                 Console.WriteLine($"[Encode]        {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
         }
