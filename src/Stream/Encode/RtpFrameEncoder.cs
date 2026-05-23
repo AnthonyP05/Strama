@@ -180,9 +180,15 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                                 && !AdapterSelector.SameAdapter(displayAdapter, encoderAdapter);
 
             // ── D3D11 devices ─────────────────────────────────────────────────
-            (displayDevice, displayCtx) = D3D11AdapterDevice.Create(displayAdapter);
+            // BgraSupport lets both devices accept BGRA-format shared resources,
+            // which is what DXGI Desktop Duplication produces. Without it the
+            // encoder device can refuse to open a shared BGRA texture from the
+            // display device with E_INVALIDARG.
+            (displayDevice, displayCtx) = D3D11AdapterDevice.Create(
+                displayAdapter, DeviceCreationFlags.BgraSupport);
             if (crossAdapter)
-                (encoderDevice, encoderCtx) = D3D11AdapterDevice.Create(encoderAdapter);
+                (encoderDevice, encoderCtx) = D3D11AdapterDevice.Create(
+                    encoderAdapter, DeviceCreationFlags.BgraSupport);
             else
             {
                 encoderDevice = displayDevice;
