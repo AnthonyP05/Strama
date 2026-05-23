@@ -88,11 +88,13 @@ internal sealed class SharedTexturePool : IDisposable
             return new SharedTexturePool(false, tex, tex, null, null, null);
         }
 
-        // Cross-adapter case: each texture is created on the display device with
-        // SharedNthandle + SharedKeyedMutex, then opened on the encoder device.
-        // D3D11 requires keyed-mutex + NT-handle resources to have RenderTarget
-        // or UnorderedAccess bind flags — ShaderResource alone fails with
-        // E_INVALIDARG at CreateTexture2D.
+        // Cross-adapter case: legacy SHARED_KEYEDMUTEX sharing.
+        // The newer NT-handle + KeyedMutex combination requires
+        // SHARED_CROSS_ADAPTER too, which Vortice 3.8.3 doesn't expose, and in
+        // practice driver support is patchy across vendor combinations. The
+        // legacy SHARED_KEYEDMUTEX path is what OBS, NVIDIA's NVENC samples,
+        // and other production cross-adapter code actually use — it works
+        // across AMD/NVIDIA/Intel D3D11 drivers reliably.
         var sharedDesc = new Texture2DDescription
         {
             Width             = (uint)width,
@@ -104,7 +106,7 @@ internal sealed class SharedTexturePool : IDisposable
             Usage             = ResourceUsage.Default,
             BindFlags         = BindFlags.ShaderResource | BindFlags.RenderTarget,
             CPUAccessFlags    = CpuAccessFlags.None,
-            MiscFlags         = ResourceOptionFlags.SharedNTHandle | ResourceOptionFlags.SharedKeyedMutex,
+            MiscFlags         = ResourceOptionFlags.SharedKeyedMutex,
         };
 
         var displayTex = new ID3D11Texture2D[poolSize];
@@ -114,8 +116,6 @@ internal sealed class SharedTexturePool : IDisposable
         var handles    = new IntPtr[poolSize];
 
         Console.WriteLine($"[Pool] Creating shared pool {width}x{height} format={format} on display device");
-        using var encoderDevice1 = encoderDevice.QueryInterface<ID3D11Device1>();
-        Console.WriteLine("[Pool] Got ID3D11Device1 on encoder device");
 
         for (int i = 0; i < poolSize; i++)
         {
@@ -129,40 +129,37 @@ internal sealed class SharedTexturePool : IDisposable
                     $"CreateTexture2D failed for shared texture {i} (format={format}, size={width}x{height})", ex);
             }
 
-            IDXGIResource1 resource1;
+            IDXGIResource resource;
             try
             {
-                resource1 = displayTex[i].QueryInterface<IDXGIResource1>();
+                resource = displayTex[i].QueryInterface<IDXGIResource>();
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    $"QueryInterface<IDXGIResource1> failed for shared texture {i}", ex);
+                    $"QueryInterface<IDXGIResource> failed for shared texture {i}", ex);
             }
 
             try
             {
-                handles[i] = resource1.CreateSharedHandle(
-                    null,
-                    Vortice.DXGI.SharedResourceFlags.Read | Vortice.DXGI.SharedResourceFlags.Write,
-                    null);
+                handles[i] = resource.SharedHandle;
             }
             catch (Exception ex)
             {
-                resource1.Dispose();
+                resource.Dispose();
                 throw new InvalidOperationException(
-                    $"CreateSharedHandle failed for shared texture {i}", ex);
+                    $"GetSharedHandle failed for shared texture {i}", ex);
             }
-            resource1.Dispose();
+            resource.Dispose();
 
             try
             {
-                encoderTex[i] = encoderDevice1.OpenSharedResource1<ID3D11Texture2D>(handles[i]);
+                encoderTex[i] = encoderDevice.OpenSharedResource<ID3D11Texture2D>(handles[i]);
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    $"OpenSharedResource1 failed for shared texture {i} (handle=0x{handles[i].ToInt64():X})", ex);
+                    $"OpenSharedResource failed for shared texture {i} (handle=0x{handles[i].ToInt64():X})", ex);
             }
 
             try
@@ -230,11 +227,8 @@ internal sealed class SharedTexturePool : IDisposable
 
         foreach (var t in _displaySide) t.Dispose();
 
-        if (_sharedHandles != null)
-            foreach (var h in _sharedHandles)
-                if (h != IntPtr.Zero) CloseHandle(h);
+        // Legacy shared handles (from IDXGIResource.GetSharedHandle) are owned
+        // by the originating device — no CloseHandle needed. Disposing the
+        // textures releases everything.
     }
-
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr handle);
 }
