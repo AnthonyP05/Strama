@@ -87,23 +87,36 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
     }
 
     // Returns the encoder name to use.
-    // "auto" probes in priority order; anything else is used as-is with a fallback
-    // if the codec isn't present in this FFmpeg build.
+    // "auto" probes in priority order, checking both that the codec is present in
+    // this FFmpeg build AND that a matching GPU adapter exists. Explicit choices
+    // are honored if compatible, else fall back to libx264.
     private static string DetectEncoder(string configured)
     {
         if (configured != "auto")
         {
-            if (ffmpeg.avcodec_find_encoder_by_name(configured) != null)
-                return configured;
-
-            Console.WriteLine($"[Encode] '{configured}' not found in FFmpeg build, falling back to libx264");
-            return "libx264";
+            if (ffmpeg.avcodec_find_encoder_by_name(configured) == null)
+            {
+                Console.WriteLine($"[Encode] '{configured}' not found in FFmpeg build, falling back to libx264");
+                return "libx264";
+            }
+            if (!AdapterSelector.IsHardwareAvailable(configured))
+            {
+                Console.WriteLine($"[Encode] '{configured}' has no matching GPU adapter on this system, falling back to libx264");
+                return "libx264";
+            }
+            return configured;
         }
 
         foreach (var name in new[] { "h264_amf", "h264_nvenc", "h264_qsv", "libx264" })
         {
-            if (ffmpeg.avcodec_find_encoder_by_name(name) != null)
-                return name;
+            if (ffmpeg.avcodec_find_encoder_by_name(name) == null) continue;
+            if (!AdapterSelector.IsHardwareAvailable(name))
+            {
+                Console.WriteLine($"[Encode] '{name}' present in FFmpeg build but no matching adapter; skipping");
+                continue;
+            }
+            Console.WriteLine($"[Encode] auto → {name}");
+            return name;
         }
         return "libx264";
     }
