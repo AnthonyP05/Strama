@@ -90,6 +90,9 @@ internal sealed class SharedTexturePool : IDisposable
 
         // Cross-adapter case: each texture is created on the display device with
         // SharedNthandle + SharedKeyedMutex, then opened on the encoder device.
+        // D3D11 requires keyed-mutex + NT-handle resources to have RenderTarget
+        // or UnorderedAccess bind flags — ShaderResource alone fails with
+        // E_INVALIDARG at CreateTexture2D.
         var sharedDesc = new Texture2DDescription
         {
             Width             = (uint)width,
@@ -99,7 +102,7 @@ internal sealed class SharedTexturePool : IDisposable
             Format            = format,
             SampleDescription = new SampleDescription(1, 0),
             Usage             = ResourceUsage.Default,
-            BindFlags         = BindFlags.ShaderResource,
+            BindFlags         = BindFlags.ShaderResource | BindFlags.RenderTarget,
             CPUAccessFlags    = CpuAccessFlags.None,
             MiscFlags         = ResourceOptionFlags.SharedNTHandle | ResourceOptionFlags.SharedKeyedMutex,
         };
