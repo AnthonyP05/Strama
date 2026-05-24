@@ -138,17 +138,10 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
     // OutputWidth / OutputHeight from the config are ignored here.
     private void RunEncodeGpu(string encoderName, CancellationToken ct)
     {
-        // Two D3D11 devices to allow cross-adapter scenarios. They reference the
-        // same instance when capture and encode happen on the same adapter (the
-        // common single-GPU case).
-        D3D11Device?            displayDevice = null;
-        D3D11Context?           displayCtx    = null;
-        D3D11Device?            encoderDevice = null;
-        D3D11Context?           encoderCtx    = null;
-        IDXGIAdapter1?          displayAdapter = null;
-        IDXGIAdapter1?          encoderAdapter = null;
-        IDXGIOutputDuplication? duplication    = null;
-        SharedTexturePool?      pool           = null;
+        D3D11Device?            d3dDevice   = null;
+        D3D11Context?           d3dCtx      = null;
+        IDXGIOutputDuplication? duplication = null;
+        D3D11Tex2D[]?           texPool     = null;
 
         AVCodecContext*  codecCtx    = null;
         AVFormatContext* fmtCtx      = null;
@@ -162,54 +155,21 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 
         try
         {
-            // ── Adapter selection ─────────────────────────────────────────────
-            // Capture must run on the adapter that owns the display output
-            // (DuplicateOutput won't work otherwise). The encoder must run on
-            // the adapter matching its vendor (NVENC on NVIDIA, AMF on AMD, etc).
-            // On hybrid laptops these can be different — we bridge with shared
-            // NT-handle textures + keyed mutexes.
-            displayAdapter = AdapterSelector.GetAdapterOwningPrimaryOutput()
-                             ?? throw new InvalidOperationException(
-                                 "No DXGI adapter owns a display output.");
-            var encoderVendor = AdapterSelector.VendorForEncoder(encoderName);
-            encoderAdapter    = encoderVendor is null
-                                ? null
-                                : AdapterSelector.FindAdapterByVendor(encoderVendor.Value);
+            // ── D3D11 + DXGI ──────────────────────────────────────────────────
+            // Capture and encode share one D3D11 device. The encoder vendor must
+            // own the display output (pre-flighted by AdapterSelector before we
+            // got here), so DriverType.Hardware picks the correct adapter.
+            d3dDevice = D3D11.D3D11CreateDevice(DriverType.Hardware, DeviceCreationFlags.None);
+            d3dCtx    = d3dDevice.ImmediateContext;
 
-            bool crossAdapter = encoderAdapter is not null
-                                && !AdapterSelector.SameAdapter(displayAdapter, encoderAdapter);
+            using var dxgiDevice = d3dDevice.QueryInterface<IDXGIDevice>();
+            using var adapter    = dxgiDevice.GetParent<IDXGIAdapter>();
 
-            // ── D3D11 devices ─────────────────────────────────────────────────
-            // BgraSupport lets both devices accept BGRA-format shared resources,
-            // which is what DXGI Desktop Duplication produces. Without it the
-            // encoder device can refuse to open a shared BGRA texture from the
-            // display device with E_INVALIDARG.
-            (displayDevice, displayCtx) = D3D11AdapterDevice.Create(
-                displayAdapter, DeviceCreationFlags.BgraSupport);
-            if (crossAdapter)
-                (encoderDevice, encoderCtx) = D3D11AdapterDevice.Create(
-                    encoderAdapter, DeviceCreationFlags.BgraSupport);
-            else
+            adapter.EnumOutputs(0, out var output).CheckError();
+            using (output)
             {
-                encoderDevice = displayDevice;
-                encoderCtx    = displayCtx;
-            }
-
-            Console.WriteLine(
-                $"[Encode] Capture on '{displayAdapter.Description1.Description.Trim()}', " +
-                $"encode on '{(encoderAdapter ?? displayAdapter).Description1.Description.Trim()}' " +
-                $"({(crossAdapter ? "cross-adapter" : "same-adapter")})");
-
-            // ── DXGI duplication on the display device ────────────────────────
-            using (var dxgiDevice = displayDevice.QueryInterface<IDXGIDevice>())
-            using (var devAdapter = dxgiDevice.GetParent<IDXGIAdapter>())
-            {
-                devAdapter.EnumOutputs(0, out var output).CheckError();
-                using (output)
-                {
-                    using var output1 = output.QueryInterface<IDXGIOutput1>();
-                    duplication = output1.DuplicateOutput(displayDevice);
-                }
+                using var output1 = output.QueryInterface<IDXGIOutput1>();
+                duplication = output1.DuplicateOutput(d3dDevice);
             }
 
             // Acquire one frame just to read capture dimensions.
@@ -237,20 +197,29 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             Console.WriteLine($"[Encode] {srcW}x{srcH} GPU native, encoder={encoderName}");
 
             // ── Intermediate texture pool ─────────────────────────────────────
-            // Same-adapter: plain pool on the one device.
-            // Cross-adapter: paired pool — texture instance on display side and
-            // mirror instance on encoder side, sharing underlying VRAM via NT
-            // handle, with keyed-mutex synchronization between sides.
+            // GPU-only textures (Usage.Default) — the GPU copies the DXGI-acquired
+            // texture here, then the encoder reads from here. Using a pool of 3
+            // gives the GPU pipeline room to breathe at high frame rates.
             const int PoolSize = 3;
-            pool = SharedTexturePool.Create(
-                displayDevice, encoderDevice,
-                srcW, srcH, captureFormat,
-                PoolSize, crossAdapter);
+            var texDesc = new Texture2DDescription
+            {
+                Width             = (uint)srcW,
+                Height            = (uint)srcH,
+                MipLevels         = 1,
+                ArraySize         = 1,
+                Format            = captureFormat,
+                SampleDescription = new SampleDescription(1, 0),
+                Usage             = ResourceUsage.Default,
+                BindFlags         = BindFlags.ShaderResource,
+                CPUAccessFlags    = CpuAccessFlags.None,
+            };
+            texPool = new D3D11Tex2D[PoolSize];
+            for (int i = 0; i < PoolSize; i++)
+                texPool[i] = d3dDevice.CreateTexture2D(texDesc);
 
             // ── FFmpeg hardware device context ────────────────────────────────
-            // Wraps the ENCODER device so the GPU encoder reads from the right
-            // adapter's VRAM. In same-adapter mode the encoder device is the
-            // display device, matching the original behavior.
+            // Wraps our D3D11 device so FFmpeg and the GPU encoder can use it.
+            // FFmpeg calls AddRef on device/device_context during av_hwdevice_ctx_init.
             hwDevBuf = ffmpeg.av_hwdevice_ctx_alloc(AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA);
             if (hwDevBuf == null) throw new InvalidOperationException("av_hwdevice_ctx_alloc failed");
 
@@ -258,10 +227,10 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             var d3d11HwCtx = (AVD3D11VADeviceContext*)hwDevCtx->hwctx;
             // FFmpeg's d3d11va_device_uninit calls Release() on both pointers.
             // AddRef here so our Vortice wrappers remain valid after FFmpeg frees its context.
-            Marshal.AddRef(encoderDevice.NativePointer);
-            Marshal.AddRef(encoderCtx.NativePointer);
-            d3d11HwCtx->device         = (FFmpeg.AutoGen.ID3D11Device*)encoderDevice.NativePointer.ToPointer();
-            d3d11HwCtx->device_context = (FFmpeg.AutoGen.ID3D11DeviceContext*)encoderCtx.NativePointer.ToPointer();
+            Marshal.AddRef(d3dDevice.NativePointer);
+            Marshal.AddRef(d3dCtx.NativePointer);
+            d3d11HwCtx->device         = (FFmpeg.AutoGen.ID3D11Device*)d3dDevice.NativePointer.ToPointer();
+            d3d11HwCtx->device_context = (FFmpeg.AutoGen.ID3D11DeviceContext*)d3dCtx.NativePointer.ToPointer();
 
             int ret = ffmpeg.av_hwdevice_ctx_init(hwDevBuf);
             if (ret < 0) ThrowFfmpegError("av_hwdevice_ctx_init", ret);
@@ -323,48 +292,39 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 if (primeResult == Vortice.DXGI.ResultCode.WaitTimeout) continue;
                 primeResult.CheckError();
 
-                int primeIdx = texIdx;
+                var primeTex    = texPool[texIdx];
+                var primeTexPtr = (byte*)primeTex.NativePointer.ToPointer();
                 texIdx = (texIdx + 1) % PoolSize;
 
-                pool.AcquireForCapture(primeIdx);
                 using (primeRes)
                 {
                     using var dxgiTex = primeRes.QueryInterface<D3D11Tex2D>();
-                    displayCtx.CopyResource(pool.DisplaySide[primeIdx], dxgiTex);
+                    d3dCtx.CopyResource(primeTex, dxgiTex);
                 }
                 duplication.ReleaseFrame().CheckError();
-                pool.ReleaseAfterCapture(primeIdx);
 
-                pool.AcquireForEncode(primeIdx);
-                try
+                var primeFrame = ffmpeg.av_frame_alloc();
+                if (primeFrame == null) continue;
+
+                primeFrame->format        = (int)AVPixelFormat.AV_PIX_FMT_D3D11;
+                primeFrame->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
+                primeFrame->data[0]       = primeTexPtr;
+                primeFrame->data[1]       = (byte*)(nuint)0;
+                primeFrame->width         = srcW;
+                primeFrame->height        = srcH;
+                primeFrame->pts           = pts++;
+                primeFrame->buf[0]        = ffmpeg.av_buffer_alloc(1);
+
+                if (ffmpeg.avcodec_send_frame(codecCtx, primeFrame) >= 0)
                 {
-                    var primeFrame = ffmpeg.av_frame_alloc();
-                    if (primeFrame == null) continue;
-
-                    primeFrame->format        = (int)AVPixelFormat.AV_PIX_FMT_D3D11;
-                    primeFrame->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
-                    primeFrame->data[0]       = (byte*)pool.EncoderSide[primeIdx].NativePointer.ToPointer();
-                    primeFrame->data[1]       = (byte*)(nuint)0;
-                    primeFrame->width         = srcW;
-                    primeFrame->height        = srcH;
-                    primeFrame->pts           = pts++;
-                    primeFrame->buf[0]        = ffmpeg.av_buffer_alloc(1);
-
-                    if (ffmpeg.avcodec_send_frame(codecCtx, primeFrame) >= 0)
+                    while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
                     {
-                        while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
-                        {
-                            var clone = ffmpeg.av_packet_clone(packet);
-                            if (clone != null) bufferedPackets.Add((nint)clone);
-                            ffmpeg.av_packet_unref(packet);
-                        }
+                        var clone = ffmpeg.av_packet_clone(packet);
+                        if (clone != null) bufferedPackets.Add((nint)clone);
+                        ffmpeg.av_packet_unref(packet);
                     }
-                    ffmpeg.av_frame_free(&primeFrame);
                 }
-                finally
-                {
-                    pool.ReleaseAfterEncode(primeIdx);
-                }
+                ffmpeg.av_frame_free(&primeFrame);
             }
             if (ct.IsCancellationRequested) return;
 
@@ -444,63 +404,54 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 
                 // Round-robin through the pool so each texture is idle for 2 frames
                 // before being reused — enough time for the GPU encoder to finish reading it.
-                int interIdx = texIdx;
+                var interTex    = texPool[texIdx];
+                var interTexPtr = (byte*)interTex.NativePointer.ToPointer();
                 texIdx = (texIdx + 1) % PoolSize;
 
-                pool.AcquireForCapture(interIdx);
                 using (desktopResource)
                 {
                     using var dxgiTex = desktopResource.QueryInterface<D3D11Tex2D>();
-                    displayCtx.CopyResource(pool.DisplaySide[interIdx], dxgiTex);
+                    d3dCtx.CopyResource(interTex, dxgiTex);
                 }
                 duplication.ReleaseFrame().CheckError();
-                pool.ReleaseAfterCapture(interIdx);
 
-                pool.AcquireForEncode(interIdx);
-                try
+                var hwFrame = ffmpeg.av_frame_alloc();
+                if (hwFrame == null) continue;
+
+                hwFrame->format        = (int)AVPixelFormat.AV_PIX_FMT_D3D11;
+                hwFrame->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
+                hwFrame->data[0]       = interTexPtr;
+                hwFrame->data[1]       = (byte*)(nuint)0;
+                hwFrame->width         = srcW;
+                hwFrame->height        = srcH;
+                hwFrame->pts           = pts++;
+                hwFrame->buf[0]        = ffmpeg.av_buffer_alloc(1);
+
+                hwFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                if (needsForcedIdr)
                 {
-                    var hwFrame = ffmpeg.av_frame_alloc();
-                    if (hwFrame == null) continue;
-
-                    hwFrame->format        = (int)AVPixelFormat.AV_PIX_FMT_D3D11;
-                    hwFrame->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
-                    hwFrame->data[0]       = (byte*)pool.EncoderSide[interIdx].NativePointer.ToPointer();
-                    hwFrame->data[1]       = (byte*)(nuint)0;
-                    hwFrame->width         = srcW;
-                    hwFrame->height        = srcH;
-                    hwFrame->pts           = pts++;
-                    hwFrame->buf[0]        = ffmpeg.av_buffer_alloc(1);
-
-                    hwFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
-                    if (needsForcedIdr)
+                    if (sinceIdr >= idrEvery)
                     {
-                        if (sinceIdr >= idrEvery)
-                        {
-                            hwFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
-                            sinceIdr           = 0;
-                        }
-                        sinceIdr++;
+                        hwFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                        sinceIdr           = 0;
                     }
-
-                    if (ffmpeg.avcodec_send_frame(codecCtx, hwFrame) >= 0)
-                    {
-                        while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
-                        {
-                            if ((packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0)
-                                Console.WriteLine($"[Encode] IDR sent: size={packet->size}");
-                            byteCount           += packet->size;
-                            packet->stream_index = rtpStream->index;
-                            ffmpeg.av_packet_rescale_ts(packet, codecCtx->time_base, rtpStream->time_base);
-                            ffmpeg.av_interleaved_write_frame(fmtCtx, packet);
-                            ffmpeg.av_packet_unref(packet);
-                        }
-                    }
-                    ffmpeg.av_frame_free(&hwFrame);
+                    sinceIdr++;
                 }
-                finally
+
+                if (ffmpeg.avcodec_send_frame(codecCtx, hwFrame) >= 0)
                 {
-                    pool.ReleaseAfterEncode(interIdx);
+                    while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
+                    {
+                        if ((packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0)
+                            Console.WriteLine($"[Encode] IDR sent: size={packet->size}");
+                        byteCount           += packet->size;
+                        packet->stream_index = rtpStream->index;
+                        ffmpeg.av_packet_rescale_ts(packet, codecCtx->time_base, rtpStream->time_base);
+                        ffmpeg.av_interleaved_write_frame(fmtCtx, packet);
+                        ffmpeg.av_packet_unref(packet);
+                    }
                 }
+                ffmpeg.av_frame_free(&hwFrame);
                 frameCount++;
 
                 if (sw.ElapsedMilliseconds >= 1000)
@@ -531,7 +482,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 var p = (AVPacket*)pPtr;
                 ffmpeg.av_packet_free(&p);
             }
-            pool?.Dispose();
+            if (texPool != null) foreach (var t in texPool) t?.Dispose();
             if (hwDevBuf    != null) { var b = hwDevBuf;    ffmpeg.av_buffer_unref(&b); }
             if (hwFramesBuf != null) { var b = hwFramesBuf; ffmpeg.av_buffer_unref(&b); }
             if (packet      != null) { var p = packet;      ffmpeg.av_packet_free(&p); }
@@ -542,16 +493,8 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 ffmpeg.avformat_free_context(fmtCtx);
             }
             duplication?.Dispose();
-            // Encoder device/context only need separate disposal in cross-adapter mode.
-            if (!ReferenceEquals(encoderDevice, displayDevice))
-            {
-                encoderCtx?.Dispose();
-                encoderDevice?.Dispose();
-            }
-            displayCtx?.Dispose();
-            displayDevice?.Dispose();
-            encoderAdapter?.Dispose();
-            displayAdapter?.Dispose();
+            d3dCtx?.Dispose();
+            d3dDevice?.Dispose();
         }
     }
 

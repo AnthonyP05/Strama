@@ -86,72 +86,18 @@ public static class AdapterSelector
     }
 
     /// <summary>
-    /// Returns true if the named encoder has a chance of running on this system.
-    /// Software encoders always return true; hardware encoders require a matching
-    /// adapter to exist (regardless of whether it owns a display — the
-    /// cross-adapter path bridges the gap).
+    /// Returns true if the named encoder has a chance of running on this system
+    /// through the current (same-adapter) GPU path. Software encoders always
+    /// return true; hardware encoders require a matching adapter that owns a
+    /// display output. Hybrid laptops where the encoder vendor's adapter has
+    /// no displays (e.g. NVIDIA dGPU + Intel iGPU driving the panel) return
+    /// false — D3D11 cross-adapter texture sharing between vendors is not
+    /// reliable, so those configurations fall back to libx264.
     /// </summary>
     public static bool IsHardwareAvailable(string encoderName)
     {
         var vendor = VendorForEncoder(encoderName);
         if (vendor is null) return true;
-        return HasAdapter(vendor.Value);
-    }
-
-    /// <summary>
-    /// Finds the first DXGI adapter matching the given vendor. Caller owns the
-    /// returned reference and must dispose it. Returns null if no match.
-    /// </summary>
-    public static IDXGIAdapter1? FindAdapterByVendor(uint vendorId)
-    {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return null;
-
-        using var factory = DXGI.CreateDXGIFactory1<IDXGIFactory1>();
-        for (uint i = 0; ; i++)
-        {
-            var hr = factory.EnumAdapters1(i, out var adapter);
-            if (hr.Failure) break;
-            if (adapter.Description1.VendorId == vendorId)
-                return adapter;
-            adapter.Dispose();
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Finds the adapter that owns the primary display output (output 0). This
-    /// is the adapter that must drive DuplicateOutput for screen capture.
-    /// On hybrid laptops, this is the integrated GPU, not the discrete one.
-    /// </summary>
-    public static IDXGIAdapter1? GetAdapterOwningPrimaryOutput()
-    {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return null;
-
-        using var factory = DXGI.CreateDXGIFactory1<IDXGIFactory1>();
-        for (uint i = 0; ; i++)
-        {
-            var hr = factory.EnumAdapters1(i, out var adapter);
-            if (hr.Failure) break;
-            if (adapter.EnumOutputs(0, out var output).Success)
-            {
-                output.Dispose();
-                return adapter;
-            }
-            adapter.Dispose();
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// True iff two adapter handles refer to the same physical GPU. Compared by
-    /// LUID, which is stable across factory instances.
-    /// </summary>
-    public static bool SameAdapter(IDXGIAdapter1 a, IDXGIAdapter1 b)
-    {
-        var aLuid = a.Description1.Luid;
-        var bLuid = b.Description1.Luid;
-        return aLuid.LowPart == bLuid.LowPart && aLuid.HighPart == bLuid.HighPart;
+        return HasAdapterWithOutput(vendor.Value);
     }
 }
