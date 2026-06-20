@@ -23,15 +23,18 @@ public sealed class CaptureSession : IDisposable
     public CaptureSession(IScreenCapturer capturer, int capacity = 2)
     {
         _capturer = capturer;
-        _channel = Channel.CreateBounded<FrameData>(new BoundedChannelOptions(capacity)
-        {
-            // When the channel is full, evict the oldest frame and write the new one.
-            // This keeps the encoder working on the most recent frame, not a stale one.
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = true,
-            ItemDropped = frame => frame.Dispose(),
-        });
+        _channel = Channel.CreateBounded<FrameData>(
+            new BoundedChannelOptions(capacity)
+            {
+                // When the channel is full, evict the oldest frame and write the new one.
+                // This keeps the encoder working on the most recent frame, not a stale one.
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = true,
+            },
+            // Dropped frames must be disposed or their pooled/native buffers leak.
+            // itemDropped is a CreateBounded parameter, not a BoundedChannelOptions property.
+            itemDropped: static frame => frame.Dispose());
     }
 
     /// <summary>
