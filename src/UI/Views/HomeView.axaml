@@ -7,82 +7,246 @@
              x:DataType="vm:HomeViewModel"
              x:Class="Strama.UI.Views.HomeView">
 
-    <Grid RowDefinitions="Auto,*,Auto" Margin="32">
+    <Grid x:Name="Root"
+          RowDefinitions="Auto,Auto,*"
+          Background="#181818">
 
-        <!-- Top row: your code -->
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,0,0,32">
-            <TextBlock Grid.Column="0"
-                       Text="Your code"
-                       FontSize="14"
-                       Opacity="0.7"
-                       VerticalAlignment="Center"
-                       Margin="0,0,16,0" />
-
-            <Border Grid.Column="1"
-                    Background="{DynamicResource SemiColorPrimaryLightDefault}"
-                    Padding="16,8"
-                    CornerRadius="6">
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <TextBlock Text="{Binding LocalCode}"
-                               FontFamily="Cascadia Code,Consolas,Menlo,monospace"
-                               FontSize="22"
+        <!-- App chrome -->
+        <Border Grid.Row="0"
+                Background="#202020"
+                BorderBrush="#343434"
+                BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+                  Height="44"
+                  Margin="14,0">
+                <StackPanel Grid.Column="0"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Spacing="8">
+                    <Border Width="18"
+                            Height="18"
+                            Background="{DynamicResource SemiColorPrimary}"
+                            CornerRadius="3" />
+                    <TextBlock Text="Strama"
+                               FontSize="15"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
-                    <Button Content="Copy"
-                            Command="{Binding CopyCodeCommand}"
-                            ToolTip.Tip="Copy code to clipboard"
-                            VerticalAlignment="Center"
-                            Padding="8,4"
-                            FontSize="12" />
                 </StackPanel>
-            </Border>
 
-            <Button Grid.Column="3"
-                    Content="⚙"
-                    FontSize="18"
-                    Width="40" Height="40"
-                    Padding="0"
-                    HorizontalContentAlignment="Center"
-                    VerticalContentAlignment="Center"
-                    ToolTip.Tip="Settings"
-                    Command="{Binding OpenSettingsCommand}" />
-        </Grid>
+                <Border Grid.Column="1"
+                        Margin="22,0,0,0"
+                        Padding="14,0"
+                        Background="#171717"
+                        BorderBrush="#2D2D2D"
+                        BorderThickness="1,0"
+                        VerticalAlignment="Stretch">
+                    <TextBlock Text="New Session"
+                               VerticalAlignment="Center"
+                               Opacity="0.86" />
+                </Border>
 
-        <!-- Center: connect to + error banner -->
-        <StackPanel Grid.Row="1"
-                    VerticalAlignment="Center"
-                    HorizontalAlignment="Center"
-                    Width="420"
-                    Spacing="12">
-            <TextBlock Text="Connect to a peer"
-                       FontSize="16"
-                       Opacity="0.85" />
-            <TextBox Text="{Binding ConnectInput}"
-                     Watermark="192.168.1.42  or  192.168.1.42:8888"
-                     FontSize="15" />
-            <Button Content="Connect"
-                    Command="{Binding ConnectCommand}"
-                    HorizontalAlignment="Stretch"
-                    Classes="Primary" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding StatusText}"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           Margin="0,0,14,0"
+                           FontSize="12"
+                           Opacity="0.62" />
 
-            <Border IsVisible="{Binding ErrorBanner, Converter={x:Static ObjectConverters.IsNotNull}}"
-                    Background="{DynamicResource SemiColorDangerLightDefault}"
-                    Padding="12,8"
-                    CornerRadius="4"
-                    Margin="0,8,0,0">
-                <TextBlock Text="{Binding ErrorBanner}"
-                           Foreground="{DynamicResource SemiColorDanger}"
-                           TextWrapping="Wrap" />
-            </Border>
-        </StackPanel>
+                <Button Grid.Column="3"
+                        Content="Menu"
+                        Width="76"
+                        Height="32"
+                        Padding="0"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        ToolTip.Tip="Application menu">
+                    <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuItem Header="Settings"
+                                      Command="{Binding OpenSettingsCommand}" />
+                            <MenuItem Header="Address Book"
+                                      Command="{Binding ShowAddressBookCommand}" />
+                            <MenuItem Header="Session Recordings"
+                                      Command="{Binding ShowSessionRecordingsCommand}" />
+                            <MenuItem Header="Help"
+                                      Command="{Binding ShowHelpCommand}" />
+                            <MenuItem Header="About Strama"
+                                      Command="{Binding ShowAboutCommand}" />
+                            <MenuItem Header="Clear Recent Sessions"
+                                      Command="{Binding ClearRecentCommand}" />
+                            <MenuItem Header="Exit"
+                                      Command="{Binding ExitCommand}" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+            </Grid>
+        </Border>
 
-        <!-- Bottom: status line -->
-        <TextBlock Grid.Row="2"
-                   Text="{Binding StatusText}"
-                   FontSize="12"
-                   Opacity="0.6"
-                   Margin="0,16,0,0" />
+        <!-- Remote address bar -->
+        <Border Grid.Row="1"
+                Background="#202020"
+                BorderBrush="#303030"
+                BorderThickness="0,0,0,1"
+                Padding="14,10">
+            <Grid ColumnDefinitions="Auto,10,*,10,Auto">
+                <Border Grid.Column="0"
+                        Width="18"
+                        Height="18"
+                        CornerRadius="9"
+                        Background="#37D65D"
+                        VerticalAlignment="Center" />
 
+                <TextBox Grid.Column="2"
+                         Text="{Binding ConnectInput}"
+                         Watermark="Enter remote address"
+                         FontSize="14"
+                         Height="34"
+                         VerticalContentAlignment="Center" />
+
+                <Button Grid.Column="4"
+                        Content="Connect"
+                        Command="{Binding ConnectCommand}"
+                        Classes="Primary"
+                        Height="34"
+                        MinWidth="104"
+                        HorizontalContentAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="2">
+            <StackPanel Margin="34,26,34,40"
+                        Spacing="26">
+
+                <!-- Local address -->
+                <Grid ColumnDefinitions="*,Auto,*">
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Spacing="18">
+                        <TextBlock Text="Your Address"
+                                   FontSize="18"
+                                   Opacity="0.9"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding LocalCode}"
+                                   FontFamily="Cascadia Code,Consolas,Menlo,monospace"
+                                   FontSize="42"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource SemiColorPrimary}"
+                                   VerticalAlignment="Center" />
+                        <Button Content="Copy"
+                                Command="{Binding CopyCodeCommand}"
+                                ToolTip.Tip="Copy address"
+                                Height="32"
+                                Padding="14,0" />
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal"
+                            Spacing="32"
+                            Margin="0,8,0,0">
+                    <TextBlock Text="Recent Sessions"
+                               Foreground="{DynamicResource SemiColorPrimary}"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="Favorites"
+                               Opacity="0.42" />
+                    <TextBlock Text="Discovered"
+                               Opacity="0.42" />
+                    <TextBlock Text="Invitations"
+                               Opacity="0.42" />
+                </StackPanel>
+
+                <Border Height="1"
+                        Background="#434343" />
+
+                <Border IsVisible="{Binding ErrorBanner, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        Background="#3A2020"
+                        BorderBrush="{DynamicResource SemiColorDanger}"
+                        BorderThickness="1"
+                        Padding="12,9"
+                        CornerRadius="4">
+                    <TextBlock Text="{Binding ErrorBanner}"
+                               TextWrapping="Wrap" />
+                </Border>
+
+                <Border IsVisible="{Binding MenuBanner, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        Background="#222A34"
+                        BorderBrush="#486A94"
+                        BorderThickness="1"
+                        Padding="12,9"
+                        CornerRadius="4">
+                    <TextBlock Text="{Binding MenuBanner}"
+                               TextWrapping="Wrap" />
+                </Border>
+
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="Recent Sessions"
+                               FontSize="14"
+                               Opacity="0.72" />
+                    <Button Grid.Column="1"
+                            Content="Clear"
+                            Command="{Binding ClearRecentCommand}"
+                            Padding="12,4"
+                            FontSize="12" />
+                </Grid>
+
+                <ItemsControl ItemsSource="{Binding RecentSessions}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RecentSessionItem">
+                            <Button Command="{Binding ConnectCommand}"
+                                    Width="246"
+                                    Height="138"
+                                    Padding="0"
+                                    Margin="0,0,12,12"
+                                    HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch">
+                                <Grid RowDefinitions="*,Auto"
+                                      Background="#252525">
+                                    <Border Grid.RowSpan="2"
+                                            BorderBrush="#3D3D3D"
+                                            BorderThickness="1" />
+                                    <Grid Grid.Row="0"
+                                          Margin="16">
+                                        <TextBlock Text="{Binding LastSeenText}"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Top"
+                                                   FontSize="12"
+                                                   Opacity="0.58" />
+                                    </Grid>
+                                    <Border Grid.Row="1"
+                                            Background="#CC141414"
+                                            Padding="14,10">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <StackPanel Grid.Column="0"
+                                                        Spacing="2">
+                                                <TextBlock Text="{Binding DisplayName}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="15" />
+                                                <TextBlock Text="{Binding Address}"
+                                                           FontFamily="Cascadia Code,Consolas,Menlo,monospace"
+                                                           FontSize="13"
+                                                           Opacity="0.78" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="Connect"
+                                                       VerticalAlignment="Bottom"
+                                                       FontSize="12"
+                                                       Opacity="0.72" />
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 
 </UserControl>

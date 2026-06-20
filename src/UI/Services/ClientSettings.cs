@@ -17,6 +17,7 @@ public sealed class ClientSettings
     public int    OutputHeight  { get; set; } = 720;
     public string Encoder       { get; set; } = "auto";
     public string LastConnect   { get; set; } = "";
+    public List<RecentSession> RecentSessions { get; set; } = [];
 
     /// <summary>
     /// Builds a HandshakeConfig from these settings. This is what the host uses
@@ -47,5 +48,22 @@ public sealed class ClientSettings
         OutputHeight = OutputHeight,
         Encoder      = Encoder,
         LastConnect  = LastConnect,
+        RecentSessions = RecentSessions
+            .Select(s => new RecentSession
+            {
+                Address          = s.Address,
+                DisplayName      = s.DisplayName,
+                LastConnectedUtc = s.LastConnectedUtc,
+                IsFavorite       = s.IsFavorite,
+            })
+            .ToList(),
     };
+}
+
+public sealed class RecentSession
+{
+    public string Address { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public DateTime LastConnectedUtc { get; set; } = DateTime.UtcNow;
+    public bool IsFavorite { get; set; }
 }

@@ -30,6 +30,7 @@ public sealed class CaptureSession : IDisposable
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
             SingleWriter = true,
+            ItemDropped = frame => frame.Dispose(),
         });
     }
 

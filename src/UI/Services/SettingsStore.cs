@@ -27,6 +27,8 @@ public static class SettingsStore
             if (!File.Exists(FilePath)) return new ClientSettings();
             string json = File.ReadAllText(FilePath);
             var loaded = JsonSerializer.Deserialize<ClientSettings>(json);
+            if (loaded is not null)
+                loaded.RecentSessions ??= [];
             return loaded ?? new ClientSettings();
         }
         catch (Exception ex)

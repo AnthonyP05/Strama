@@ -194,7 +194,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             }
             if (ct.IsCancellationRequested) return;
 
-            Console.WriteLine($"[Encode] {srcW}x{srcH} GPU native, encoder={encoderName}");
+            Console.WriteLine($"[Encode] {srcW}x{srcH} GPU native, format={captureFormat}, encoder={encoderName}");
 
             // ── Intermediate texture pool ─────────────────────────────────────
             // GPU-only textures (Usage.Default) — the GPU copies the DXGI-acquired
@@ -264,7 +264,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             codecCtx->time_base     = new AVRational { num = 1, den = _config.Framerate };
             codecCtx->framerate     = new AVRational { num = _config.Framerate, den = 1 };
             codecCtx->bit_rate      = ParseBitrate(_config.Bitrate);
-            codecCtx->gop_size      = _config.Framerate / 2;  // IDR every ~0.5 s → inline SPS/PPS
+            codecCtx->gop_size      = Math.Max(_config.Framerate * 5, _config.Framerate);
             codecCtx->flags        |= ffmpeg.AV_CODEC_FLAG_LOW_DELAY;
             codecCtx->hw_device_ctx = ffmpeg.av_buffer_ref(hwDevBuf);
             codecCtx->hw_frames_ctx = ffmpeg.av_buffer_ref(hwFramesBuf);
@@ -442,8 +442,6 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 {
                     while (ffmpeg.avcodec_receive_packet(codecCtx, packet) == 0)
                     {
-                        if ((packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0)
-                            Console.WriteLine($"[Encode] IDR sent: size={packet->size}");
                         byteCount           += packet->size;
                         packet->stream_index = rtpStream->index;
                         ffmpeg.av_packet_rescale_ts(packet, codecCtx->time_base, rtpStream->time_base);
@@ -515,6 +513,11 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             int srcH  = first.Height;
             int dstW  = int.Parse(_config.OutputWidth);
             int dstH  = int.Parse(_config.OutputHeight);
+            if (dstW <= 0 || dstH <= 0)
+            {
+                dstW = srcW;
+                dstH = srcH;
+            }
 
             Console.WriteLine($"[Encode] {srcW}x{srcH} → {dstW}x{dstH}, encoder={_config.Encoder}");
 
@@ -535,7 +538,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             codecCtx->time_base = new AVRational { num = 1, den = _config.Framerate };
             codecCtx->framerate = new AVRational { num = _config.Framerate, den = 1 };
             codecCtx->bit_rate  = ParseBitrate(_config.Bitrate);
-            codecCtx->gop_size  = _config.Framerate / 2;  // IDR every ~0.5 s → inline SPS/PPS
+            codecCtx->gop_size  = Math.Max(_config.Framerate * 5, _config.Framerate);
             codecCtx->flags    |= ffmpeg.AV_CODEC_FLAG_LOW_DELAY;
 
             AVDictionary* encOpts = null;
