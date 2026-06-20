@@ -42,7 +42,7 @@ public static class UDPReceiver
             """;
         string path = Path.Combine(Path.GetTempPath(), "stream.sdp");
         File.WriteAllText(path, content);
-        Console.WriteLine($"[Decode] SDP written to {path}");
+        DebugLog.Line($"[Decode] SDP written to {path}");
         return path;
     }
 }

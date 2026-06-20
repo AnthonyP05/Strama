@@ -27,7 +27,11 @@ internal static class Program
     public static int Main(string[] args)
     {
         if (args.Length >= 1 && args[0] == "--console")
+        {
+            // Console mode is the transport regression harness — keep it verbose.
+            DebugLog.Enabled = true;
             return RunConsole(args[1..]).GetAwaiter().GetResult();
+        }
 
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }

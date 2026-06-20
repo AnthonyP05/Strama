@@ -140,9 +140,9 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
             if (frame == null || packet == null)
                 throw new OutOfMemoryException("FFmpeg frame/packet alloc failed.");
 
-            Console.WriteLine($"[Decode] Codec: {System.Runtime.InteropServices.Marshal.PtrToStringAnsi((nint)codec->name)}" +
-                              $"  extradata={codecCtx->extradata_size}B" +
-                              $"  w={codecCtx->width} h={codecCtx->height}");
+            DebugLog.Line($"[Decode] Codec: {System.Runtime.InteropServices.Marshal.PtrToStringAnsi((nint)codec->name)}" +
+                          $"  extradata={codecCtx->extradata_size}B" +
+                          $"  w={codecCtx->width} h={codecCtx->height}");
 
             int pktCount   = 0;
             int frameCount = 0;
@@ -153,41 +153,45 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
                 ret = ffmpeg.av_read_frame(fmtCtx, packet);
                 if (ret < 0)
                 {
-                    Console.WriteLine($"[Decode] av_read_frame ended after {pktCount} pkts / {frameCount} frames: {AvError(ret)}");
+                    DebugLog.Line($"[Decode] av_read_frame ended after {pktCount} pkts / {frameCount} frames: {AvError(ret)}");
                     break;
                 }
 
                 if (packet->stream_index == videoIdx)
                 {
-                    bool isKey = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
-
-                    // Walk the annexb NAL units to see what's actually in this packet.
-                    // NAL types: 1=non-IDR slice, 5=IDR slice, 7=SPS, 8=PPS, 9=AUD.
-                    var nalTypes = ScanNalTypes(packet->data, packet->size);
-                    bool hasIdr = nalTypes.Contains(5);
-                    bool hasSps = nalTypes.Contains(7);
-                    bool hasPps = nalTypes.Contains(8);
-                    if (hasIdr) keyCount++;
-
-                    if (pktCount < 10 || hasIdr || hasSps)
+                    // The annexb NAL scan is per-packet work done purely for diagnostics,
+                    // so skip it entirely unless verbose logging is on (#7).
+                    if (DebugLog.Enabled)
                     {
-                        Console.WriteLine($"[Decode] pkt#{pktCount} size={packet->size} key={isKey} " +
+                        bool isKey = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
+
+                        // NAL types: 1=non-IDR slice, 5=IDR slice, 7=SPS, 8=PPS, 9=AUD.
+                        var nalTypes = ScanNalTypes(packet->data, packet->size);
+                        bool hasIdr = nalTypes.Contains(5);
+                        bool hasSps = nalTypes.Contains(7);
+                        bool hasPps = nalTypes.Contains(8);
+                        if (hasIdr) keyCount++;
+
+                        if (pktCount < 10 || hasIdr || hasSps)
+                        {
+                            DebugLog.Line($"[Decode] pkt#{pktCount} size={packet->size} key={isKey} " +
                                           $"NALs=[{string.Join(",", nalTypes)}]" +
                                           (hasIdr ? " <IDR>" : "") +
                                           (hasSps ? " <SPS>" : "") +
                                           (hasPps ? " <PPS>" : ""));
+                        }
                     }
                     pktCount++;
                     int decoded = Decode(codecCtx, frame, packet, ref swsCtx);
                     frameCount += decoded;
-                    if (decoded > 0 && frameCount <= 3)
-                        Console.WriteLine($"[Decode] First decoded frame #{frameCount}  fmt={frame->format}  {frame->width}x{frame->height}");
+                    if (DebugLog.Enabled && decoded > 0 && frameCount <= 3)
+                        DebugLog.Line($"[Decode] First decoded frame #{frameCount}  fmt={frame->format}  {frame->width}x{frame->height}");
                 }
 
                 // Periodic summary: shows whether packets arrive but frames don't decode.
                 if (statTimer.ElapsedMilliseconds >= 3000)
                 {
-                    Console.WriteLine($"[Decode] stats: {pktCount} pkts  {keyCount} key  {frameCount} decoded");
+                    DebugLog.Line($"[Decode] stats: {pktCount} pkts  {keyCount} key  {frameCount} decoded");
                     statTimer.Restart();
                 }
 

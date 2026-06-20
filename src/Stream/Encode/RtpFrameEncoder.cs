@@ -329,6 +329,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             if (ct.IsCancellationRequested) return;
 
             // Diagnose: show what the encoder produced during priming
+            if (DebugLog.Enabled)
             {
                 Console.Write($"[Encode] Primed: extradata={codecCtx->extradata_size}B");
                 if (codecCtx->extradata_size > 0)
@@ -455,7 +456,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 if (sw.ElapsedMilliseconds >= 1000)
                 {
                     double kbps = byteCount * 8.0 / 1000.0;
-                    Console.WriteLine($"[Encode] {frameCount} fps  {kbps:F0} kbps  {srcW}x{srcH} [GPU]");
+                    DebugLog.Line($"[Encode] {frameCount} fps  {kbps:F0} kbps  {srcW}x{srcH} [GPU]");
                     frameCount = 0;
                     byteCount  = 0;
                     sw.Restart();
@@ -614,7 +615,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 if (sw.ElapsedMilliseconds >= 1000)
                 {
                     double kbps = byteCount * 8.0 / 1000.0;
-                    Console.WriteLine($"[Encode] {frameCount} fps  {kbps:F0} kbps  {dstW}x{dstH} [CPU]");
+                    DebugLog.Line($"[Encode] {frameCount} fps  {kbps:F0} kbps  {dstW}x{dstH} [CPU]");
                     frameCount = 0;
                     byteCount  = 0;
                     sw.Restart();
