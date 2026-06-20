@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using FFmpeg.AutoGen;
@@ -49,12 +50,16 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
     public FFmpegFrameDecoder(string sdpPath, int capacity = 2)
     {
         _sdpPath = sdpPath;
-        _channel = Channel.CreateBounded<FrameData>(new BoundedChannelOptions(capacity)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = true,
-        });
+        _channel = Channel.CreateBounded<FrameData>(
+            new BoundedChannelOptions(capacity)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = true,
+            },
+            // Frames carry pooled pixel buffers; a dropped frame must be disposed
+            // so its buffer returns to the pool instead of leaking out of it.
+            itemDropped: static frame => frame.Dispose());
     }
 
     /// <summary>
@@ -271,7 +276,13 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 
         if (swsCtx == null) return;
 
-        var pixels = new byte[w * h * 4];
+        // Rent the BGRA buffer instead of allocating ~14 MB/frame at 1440p. Rent may
+        // return a larger array than requested; every consumer copies exactly
+        // Width*Height*4 bytes, so the extra tail is harmless. The buffer is returned
+        // to the pool when the FrameData is disposed (by the consumer after copy, or
+        // by the channel's itemDropped if it's evicted before being read).
+        int needed = w * h * 4;
+        byte[] pixels = ArrayPool<byte>.Shared.Rent(needed);
         fixed (byte* dstPtr = pixels)
         {
             // BGRA is a packed single-plane format, so only slot [0] is needed.
@@ -280,7 +291,11 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
             ffmpeg.sws_scale(swsCtx, frame->data, frame->linesize, 0, h, dstData, dstLinesize);
         }
 
-        _channel.Writer.TryWrite(new FrameData(pixels, w, h));
+        // If the channel can't accept the frame (it never blocks — DropOldest), return
+        // the rented buffer immediately so it doesn't leak out of the pool.
+        var data = new FrameData(pixels, w, h, pooled: true);
+        if (!_channel.Writer.TryWrite(data))
+            data.Dispose();
     }
 
     private static string AvError(int code)
