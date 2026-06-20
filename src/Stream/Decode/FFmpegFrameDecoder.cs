@@ -25,6 +25,9 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 
     public ChannelReader<FrameData> Frames => _channel.Reader;
 
+    /// <summary>Live byte counter for the viewer's bitrate readout (#16).</summary>
+    public StreamStats Stats { get; } = new();
+
     // Runs once the first time FFmpegFrameDecoder is used.
     // Sets the DLL search path and activates all FFmpeg function pointers.
     // Without Initialize(), every ffmpeg.* call throws NotSupportedException.
@@ -159,6 +162,10 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 
                 if (packet->stream_index == videoIdx)
                 {
+                    // Count compressed bytes as they arrive — this is the source for the
+                    // viewer's live bitrate readout, reflecting actual network throughput (#16).
+                    Stats.AddBytes(packet->size);
+
                     // The annexb NAL scan is per-packet work done purely for diagnostics,
                     // so skip it entirely unless verbose logging is on (#7).
                     if (DebugLog.Enabled)

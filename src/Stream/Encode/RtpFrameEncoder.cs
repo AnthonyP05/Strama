@@ -91,7 +91,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
     // "auto" probes in priority order, checking both that the codec is present in
     // this FFmpeg build AND that a matching GPU adapter exists. Explicit choices
     // are honored if compatible, else fall back to libx264.
-    private static string DetectEncoder(string configured)
+    internal static string DetectEncoder(string configured)
     {
         if (configured != "auto")
         {

@@ -22,7 +22,8 @@ public sealed record IncomingRequest(IPEndPoint PeerEndPoint, DateTime ReceivedA
 
 public sealed record StreamHandle(
     ChannelReader<FrameData> Frames,
-    HandshakeConfig Config);
+    HandshakeConfig Config,
+    Strama.Decode.StreamStats Stats);
 
 /// <summary>
 /// Owns the entire connection lifecycle. There is exactly one of these per
@@ -149,7 +150,7 @@ public sealed class ConnectionManager : IDisposable
         _decodeTask = session.Running;
 
         SetState(ConnectionState.Viewing);
-        StreamStarted?.Invoke(new StreamHandle(session.Frames, resp.Config));
+        StreamStarted?.Invoke(new StreamHandle(session.Frames, resp.Config, session.Stats));
 
         _ = MonitorViewerSessionAsync(tcp, session.Running);
     }
@@ -258,6 +259,10 @@ public sealed class ConnectionManager : IDisposable
             // changes apply to fresh sessions without needing a manager rebuild.
             var template = _hostTemplateProvider();
             template.TcpPort = _tcpPort;
+            // Resolve "auto" (and validate explicit choices) to the concrete encoder
+            // the host will actually run, so the viewer's HUD shows the real codec
+            // instead of "auto" (#16). RtpFrameEncoder re-validates this at Run time.
+            template.Encoder = RtpFrameEncoder.DetectEncoder(template.Encoder);
             var effective = await HandshakeProtocol.AcceptAsync(
                 tcp,
                 approveAsync: peer =>
