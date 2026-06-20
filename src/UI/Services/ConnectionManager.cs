@@ -54,7 +54,8 @@ public sealed class ConnectionManager : IDisposable
     // Active session.
     private TcpClient?         _sessionTcp;
     private RtpFrameEncoder?   _encoder;
-    private Task?              _encodeTask;
+    private Task?              _encodeTask;      // host side: the running encoder
+    private Task?              _decodeTask;      // viewer side: the running FFmpeg decoder
     private int                _tearingDown;     // Interlocked flag — guards against double-teardown
 
     public ConnectionState State { get; private set; } = ConnectionState.Idle;
@@ -145,6 +146,7 @@ public sealed class ConnectionManager : IDisposable
         _sessionCts = new CancellationTokenSource();
         var session = UDPReceiver.Start(resp.Config, _sessionCts.Token);
         _sessionTcp = tcp;
+        _decodeTask = session.Running;
 
         SetState(ConnectionState.Viewing);
         StreamStarted?.Invoke(new StreamHandle(session.Frames, resp.Config));
@@ -192,11 +194,20 @@ public sealed class ConnectionManager : IDisposable
             }
 
             _sessionCts?.Cancel();
+            // Wait for the encoder (host) to fully return so its FFmpeg context —
+            // and the RTP UDP socket it owns — are released before we go Idle and
+            // accept the next session. The decoder (viewer) unblocks via its
+            // interrupt_callback, freeing the UDP port it binds so an immediate
+            // reconnect on the same port can rebind it (#15).
             if (_encodeTask is not null) { try { await _encodeTask; } catch { } }
+            if (_decodeTask is not null) { try { await _decodeTask; } catch { } }
             _sessionTcp?.Dispose();
             _sessionTcp = null;
             _encoder    = null;
             _encodeTask = null;
+            _decodeTask = null;
+            _sessionCts?.Dispose();
+            _sessionCts = null;
             SetState(ConnectionState.Idle);
             SessionEnded?.Invoke(reason);
         }

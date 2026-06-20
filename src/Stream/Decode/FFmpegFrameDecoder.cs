@@ -18,6 +18,11 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
     private readonly string _sdpPath;
     private readonly Channel<FrameData> _channel;
 
+    // Held as an instance field so the GC never collects the delegate while
+    // FFmpeg still holds a native function pointer to it (see interrupt_callback
+    // setup in Run). Collecting it mid-stream would crash the decode thread.
+    private AVIOInterruptCB_callback? _interruptDelegate;
+
     public ChannelReader<FrameData> Frames => _channel.Reader;
 
     // Runs once the first time FFmpegFrameDecoder is used.
@@ -63,12 +68,31 @@ public sealed unsafe class FFmpegFrameDecoder : IFrameDecoder
 
         try
         {
+            // Allocate the context up front so we can install an interrupt_callback
+            // before any blocking I/O begins. FFmpeg polls this callback during
+            // blocking calls (notably av_read_frame parked on a silent UDP socket);
+            // returning 1 makes the call bail with AVERROR_EXIT. Without it, when a
+            // session ends and UDP simply goes quiet, av_read_frame never returns and
+            // the decode thread + its UDP socket leak for the life of the process.
+            fmtCtx = ffmpeg.avformat_alloc_context();
+            if (fmtCtx == null) throw new OutOfMemoryException("avformat_alloc_context returned null.");
+
+            _interruptDelegate = _ => ct.IsCancellationRequested ? 1 : 0;
+            fmtCtx->interrupt_callback.callback = new AVIOInterruptCB_callback_func
+            {
+                Pointer = Marshal.GetFunctionPointerForDelegate(_interruptDelegate),
+            };
+            fmtCtx->interrupt_callback.opaque = null;
+
             // The SDP file contains rtp:// URIs, which are carried over udp://.
             // FFmpeg's protocol whitelist blocks any protocol chain not listed here.
             // probesize/analyzeduration cut the startup delay before the first frame.
             AVDictionary* opts = null;
             ffmpeg.av_dict_set(&opts, "protocol_whitelist", "file,rtp,udp", 0);
-            ffmpeg.av_dict_set(&opts, "probesize",          "32",           0);
+            // probesize must hold at least one full access unit; 32 bytes triggers a
+            // "not enough frames to estimate rate" warning. We get the real params from
+            // the SDP's extradata, so a larger probe just silences the noise (#9).
+            ffmpeg.av_dict_set(&opts, "probesize",          "100000",       0);
             ffmpeg.av_dict_set(&opts, "analyzeduration",    "0",            0);
             // 10 MB socket receive buffer — without this the kernel drops fragments of large IDR
             // frames (~200 KB each, split into ~143 UDP datagrams) before the app reads them.
