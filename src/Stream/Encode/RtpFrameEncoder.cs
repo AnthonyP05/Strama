@@ -122,6 +122,26 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         return "libx264";
     }
 
+    // Starts Desktop Duplication, preferring DuplicateOutput1 with an explicit
+    // request for 8-bit BGRA. On an HDR / 10-bit desktop the legacy DuplicateOutput
+    // returns a float / 10-bit surface that the BGRA encoder path misreads as purple
+    // garbage; asking for B8G8R8A8_UNorm lets the OS tone-map to SDR BGRA for us.
+    // Falls back to the legacy path if the OS/driver refuses (older Windows, etc.) —
+    // the caller's format guard then catches any non-BGRA result.
+    private static IDXGIOutputDuplication DuplicateDesktopAsBgra(IDXGIOutput output, D3D11Device device)
+    {
+        try
+        {
+            using var output5 = output.QueryInterface<IDXGIOutput5>();
+            return output5.DuplicateOutput1(device, 0, new[] { Format.B8G8R8A8_UNorm });
+        }
+        catch
+        {
+            using var output1 = output.QueryInterface<IDXGIOutput1>();
+            return output1.DuplicateOutput(device);
+        }
+    }
+
     // ─── GPU path ─────────────────────────────────────────────────────────────
     //
     // Runs capture + encode on a single thread so the D3D11 immediate context is
@@ -168,8 +188,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             adapter.EnumOutputs(0, out var output).CheckError();
             using (output)
             {
-                using var output1 = output.QueryInterface<IDXGIOutput1>();
-                duplication = output1.DuplicateOutput(d3dDevice);
+                duplication = DuplicateDesktopAsBgra(output, d3dDevice);
             }
 
             // Acquire one frame just to read capture dimensions.
@@ -195,6 +214,19 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             if (ct.IsCancellationRequested) return;
 
             Console.WriteLine($"[Encode] {srcW}x{srcH} GPU native, format={captureFormat}, encoder={encoderName}");
+
+            // The whole GPU pipeline assumes 8-bit BGRA (hwframes sw_format below).
+            // On an HDR / 10-bit desktop, Desktop Duplication hands back
+            // R16G16B16A16_FLOAT or R10G10B10A2 instead; feeding those bytes to the
+            // encoder as BGRA produces the purple/sheared corruption. We already try
+            // to request BGRA via DuplicateOutput1; if the OS still gave us something
+            // else, fail loudly with a fix the user can act on rather than stream garbage.
+            if (captureFormat != Format.B8G8R8A8_UNorm)
+                throw new NotSupportedException(
+                    $"Host desktop is being captured as {captureFormat}, not 8-bit BGRA — " +
+                    "this almost always means HDR or 10-bit color is enabled on the host display. " +
+                    "Turn HDR off on the host (Win+Alt+B, or Settings ▸ System ▸ Display ▸ HDR) and " +
+                    "reconnect. (Native HDR capture isn't supported yet.)");
 
             // ── Intermediate texture pool ─────────────────────────────────────
             // GPU-only textures (Usage.Default) — the GPU copies the DXGI-acquired
