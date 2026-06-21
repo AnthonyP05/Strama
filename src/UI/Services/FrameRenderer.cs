@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Channels;
 using Avalonia;
 using Avalonia.Media.Imaging;
@@ -27,6 +28,14 @@ public sealed class FrameRenderer : INotifyPropertyChanged, IDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task?            _runTask;
     private WriteableBitmap? _bitmap;
+
+    // Guards against flooding the UI dispatcher. We invalidate at most once per
+    // pending redraw: 0 = no redraw queued, 1 = one queued. At high frame rates the
+    // decoder produces frames faster than the UI can paint a 4K bitmap; posting a
+    // redraw per frame grows the dispatcher queue without bound, so display latency
+    // climbs steadily over a session. Because the bitmap is reused and always holds
+    // the newest pixels, one pending invalidate is enough to show the latest frame.
+    private int _redrawQueued;
 
     public WriteableBitmap? Bitmap
     {
@@ -77,7 +86,17 @@ public sealed class FrameRenderer : INotifyPropertyChanged, IDisposable
                     RaiseProp(nameof(LastFps));
                 }
 
-                Dispatcher.UIThread.Post(() => FrameReady?.Invoke(), DispatcherPriority.Render);
+                // Coalesce redraws: only queue one if none is already pending. This
+                // caps the dispatcher backlog at a single invalidate so latency can't
+                // accumulate when the UI paints slower than frames arrive.
+                if (Interlocked.Exchange(ref _redrawQueued, 1) == 0)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        Interlocked.Exchange(ref _redrawQueued, 0);
+                        FrameReady?.Invoke();
+                    }, DispatcherPriority.Render);
+                }
 
                 f.Dispose();
             }
