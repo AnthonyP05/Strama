@@ -1,66 +1,61 @@
+using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
+using Vortice.Mathematics;
 
 namespace Strama.Encode;
 
 /// <summary>
-/// Converts an HDR / 10-bit desktop-duplication frame to 8-bit SDR BGRA using the
-/// D3D11 VideoProcessor, which performs the colour-space conversion and tone-mapping
-/// in hardware. This is only constructed when the captured desktop format isn't
-/// already <see cref="Format.B8G8R8A8_UNorm"/> — an SDR desktop keeps the existing
-/// zero-copy CopyResource path and never touches this class.
+/// Converts an HDR / 10-bit desktop-duplication frame to 8-bit SDR BGRA on the GPU
+/// with a small render-to-texture pixel shader. Only constructed when the captured
+/// desktop format isn't already <see cref="Format.B8G8R8A8_UNorm"/> — an SDR desktop
+/// keeps the existing zero-copy CopyResource path and never touches this class.
 ///
-/// Why it's needed: on an HDR display, DXGI Desktop Duplication hands back
-/// R16G16B16A16_FLOAT (scRGB) or R10G10B10A2 (HDR10), not 8-bit BGRA. Feeding those
-/// bytes to the H.264 encoder as if they were BGRA produces purple/sheared garbage.
-/// The VideoProcessor reads them in their real colour space and writes proper SDR
-/// sRGB BGRA that the encoder pipeline expects.
+/// Why a shader and not the D3D11 VideoProcessor: on an HDR display Desktop
+/// Duplication hands back R16G16B16A16_FLOAT (scRGB), and the AMD VideoProcessor
+/// rejects FP16 RGBA as an input format (CreateVideoProcessorInputView → E_INVALIDARG).
+/// A shader-resource view over FP16 is universally supported, so we sample the scRGB
+/// texel directly and write SDR sRGB into a BGRA8 render target the encoder can read.
+///
+/// Conversion: scRGB is linear, Rec.709 primaries, 1.0 = SDR white. SDR desktop
+/// content lives in [0,1]; the shader clips HDR highlights (>1) and applies the sRGB
+/// transfer function. Same-resolution 1:1 texel fetch, so no sampler/scaling.
 /// </summary>
 internal sealed class HdrToSdrConverter : IDisposable
 {
-    private readonly ID3D11VideoDevice               _videoDevice;
-    private readonly ID3D11VideoContext1             _videoContext;
-    private readonly ID3D11VideoProcessor            _processor;
-    private readonly ID3D11VideoProcessorEnumerator  _enumerator;
-    private readonly ID3D11Texture2D                 _stagingHdr;   // VP input (copy of the acquired frame)
-    private readonly ID3D11VideoProcessorInputView   _inputView;
+    // Precompiled with fxc (vs_4_0 / ps_4_0). Source + recompile command in
+    // src/Stream/Encode/Shaders/*.hlsl.
+    private const string VsBytecodeB64 =
+        "RFhCQz+aSUzVceIyN1VOzTCZ3n4BAAAAZAIAAAUAAAA0AAAAgAAAALQAAADoAAAA6AEAAFJERUZEAAAAAAAAAAAAAAAAAAAAHAAAAAAE/v8AgQAAHAAAAE1pY3Jvc29mdCAoUikgSExTTCBTaGFkZXIgQ29tcGlsZXIgMTAuMQBJU0dOLAAAAAEAAAAIAAAAIAAAAAAAAAAGAAAAAQAAAAAAAAABAQAAU1ZfVmVydGV4SUQAT1NHTiwAAAABAAAACAAAACAAAAAAAAAAAQAAAAMAAAAAAAAADwAAAFNWX1Bvc2l0aW9uAFNIRFL4AAAAQAABAD4AAABgAAAEEhAQAAAAAAAGAAAAZwAABPIgEAAAAAAAAQAAAGgAAAIBAAAAKQAABxIAEAAAAAAAChAQAAAAAAABQAAAAQAAAAEAAAcSABAAAAAAAAoAEAAAAAAAAUAAAAIAAAABAAAHQgAQAAAAAAAKEBAAAAAAAAFAAAACAAAAVgAABTIAEAAAAAAAhgAQAAAAAAAyAAAPMiAQAAAAAABGABAAAAAAAAJAAAAAAABAAAAAwAAAAAAAAAAAAkAAAAAAgL8AAIA/AAAAAAAAAAA2AAAIwiAQAAAAAAACQAAAAAAAAAAAAAAAAAAAAAACAPz4AAAFTVEFUdAAAAAcAAAABAAAAAAAAAAIAAAABAAAAAQAAAAIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-    // VP output views are per-destination-texture; the encoder reuses a small pool
-    // of BGRA textures, so cache one output view per texture rather than recreating.
-    private readonly Dictionary<nint, ID3D11VideoProcessorOutputView> _outputViews = new();
+    private const string PsBytecodeB64 =
+        "RFhCQ6qFIy2rXoCVSJTkNkSx3lEBAAAASAMAAAUAAAA0AAAApAAAANgAAAAMAQAAzAIAAFJERUZoAAAAAAAAAAAAAAABAAAAHAAAAAAE//8AgQAAQAAAADwAAAACAAAABQAAAAQAAAD/////AAAAAAEAAAANAAAAU3JjAE1pY3Jvc29mdCAoUikgSExTTCBTaGFkZXIgQ29tcGlsZXIgMTAuMQBJU0dOLAAAAAEAAAAIAAAAIAAAAAAAAAABAAAAAwAAAAAAAAAPAwAAU1ZfUG9zaXRpb24AT1NHTiwAAAABAAAACAAAACAAAAAAAAAAAAAAAAMAAAAAAAAADwAAAFNWX1RhcmdldACrq1NIRFK4AQAAQAAAAG4AAABYGAAEAHAQAAAAAABVVQAAZCAABDIQEAAAAAAAAQAAAGUAAAPyIBAAAAAAAGgAAAIDAAAAGwAABTIAEAAAAAAARhAQAAAAAAA2AAAIwgAQAAAAAAACQAAAAAAAAAAAAAAAAAAAAAAAAC0AAAfyABAAAAAAAEYOEAAAAAAARn4QAAAAAAA2IAAFcgAQAAAAAABGAhAAAAAAAC8AAAVyABAAAQAAAEYCEAAAAAAAOAAACnIAEAABAAAARgIQAAEAAAACQAAAVVXVPlVV1T5VVdU+AAAAABkAAAVyABAAAQAAAEYCEAABAAAAMgAAD3IAEAABAAAARgIQAAEAAAACQAAAPQqHPz0Khz89Coc/AAAAAAJAAACuR2G9rkdhva5HYb0AAAAAHQAACnIAEAACAAAAAkAAABwuTTscLk07HC5NOwAAAABGAhAAAAAAADgAAApyABAAAAAAAEYCEAAAAAAAAkAAAFK4TkFSuE5BUrhOQQAAAAA3AAAJciAQAAAAAABGAhAAAgAAAEYCEAAAAAAARgIQAAEAAAA2AAAFgiAQAAAAAAABQAAAAACAPz4AAAFTVEFUdAAAAA0AAAADAAAAAAAAAAIAAAAGAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAADAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    private readonly ID3D11Device              _device;
+    private readonly ID3D11VertexShader        _vs;
+    private readonly ID3D11PixelShader         _ps;
+    private readonly ID3D11Texture2D           _stagingHdr;   // SRV source (copy of the acquired frame)
+    private readonly ID3D11ShaderResourceView  _srv;
+    private readonly ID3D11RasterizerState     _rasterizer;   // CullNone so winding can't blank the output
+    private readonly Viewport                  _viewport;
+
+    // RTVs are per destination texture; the encoder reuses a small pool, so cache one
+    // render-target view per texture rather than recreating it every frame.
+    private readonly Dictionary<nint, ID3D11RenderTargetView> _rtvs = new();
 
     public HdrToSdrConverter(
         ID3D11Device device, ID3D11DeviceContext context,
         int width, int height, Format captureFormat)
     {
-        _videoDevice  = device.QueryInterface<ID3D11VideoDevice>();
-        _videoContext = context.QueryInterface<ID3D11VideoContext1>();
+        _device   = device;
+        _viewport = new Viewport(0, 0, width, height, 0f, 1f);
 
-        var content = new VideoProcessorContentDescription
-        {
-            InputFrameFormat = VideoFrameFormat.Progressive,
-            InputFrameRate   = new Rational(60, 1),
-            InputWidth       = (uint)width,
-            InputHeight      = (uint)height,
-            OutputFrameRate  = new Rational(60, 1),
-            OutputWidth      = (uint)width,
-            OutputHeight     = (uint)height,
-            Usage            = VideoUsage.PlaybackNormal,
-        };
-        _enumerator = _videoDevice.CreateVideoProcessorEnumerator(content);
-        _processor  = _videoDevice.CreateVideoProcessor(_enumerator, 0);
+        _vs = device.CreateVertexShader(System.Convert.FromBase64String(VsBytecodeB64));
+        _ps = device.CreatePixelShader(System.Convert.FromBase64String(PsBytecodeB64));
 
-        // Tell the VP what it's reading (HDR) and producing (SDR sRGB) so it
-        // tone-maps rather than reinterpreting the bytes.
-        var inputColorSpace = captureFormat == Format.R10G10B10A2_UNorm
-            ? ColorSpaceType.RgbFullG2084NoneP2020   // HDR10: PQ transfer, Rec.2020 primaries
-            : ColorSpaceType.RgbFullG10NoneP709;      // scRGB: linear FP16, Rec.709 primaries
-        _videoContext.VideoProcessorSetStreamColorSpace1(_processor, 0, inputColorSpace);
-        _videoContext.VideoProcessorSetOutputColorSpace1(_processor, ColorSpaceType.RgbFullG22NoneP709);
-
-        // The VP reads from an input view, which must be backed by a texture we
-        // control. The acquired duplication texture can't reliably back one, so we
-        // CopyResource into this staging texture (same HDR format) each frame.
+        // The shader samples from an SRV, which needs a texture we control with the
+        // ShaderResource bind flag. The acquired duplication texture can't reliably
+        // back one, so CopyResource into this staging texture (same HDR format) first.
         _stagingHdr = device.CreateTexture2D(new Texture2DDescription
         {
             Width             = (uint)width,
@@ -73,15 +68,13 @@ internal sealed class HdrToSdrConverter : IDisposable
             BindFlags         = BindFlags.ShaderResource,
             CPUAccessFlags    = CpuAccessFlags.None,
         });
+        _srv = device.CreateShaderResourceView(_stagingHdr);
 
-        _inputView = _videoDevice.CreateVideoProcessorInputView(
-            _stagingHdr, _enumerator,
-            new VideoProcessorInputViewDescription
-            {
-                FourCC        = 0,
-                ViewDimension = VideoProcessorInputViewDimension.Texture2D,
-                Texture2D     = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 },
-            });
+        _rasterizer = device.CreateRasterizerState(new RasterizerDescription
+        {
+            FillMode = FillMode.Solid,
+            CullMode = CullMode.None,
+        });
     }
 
     /// <summary>
@@ -92,40 +85,42 @@ internal sealed class HdrToSdrConverter : IDisposable
     {
         context.CopyResource(_stagingHdr, acquired);
 
-        var outputView = GetOutputView(destBgra);
-        var stream = new VideoProcessorStream
-        {
-            Enable       = true,
-            InputSurface = _inputView,
-        };
-        _videoContext.VideoProcessorBlt(_processor, outputView, 0, new[] { stream });
+        var rtv = GetRenderTargetView(destBgra);
+
+        context.IASetInputLayout(null);
+        context.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
+        context.VSSetShader(_vs);
+        context.PSSetShader(_ps);
+        context.PSSetShaderResource(0, _srv);
+        context.RSSetState(_rasterizer);
+        context.RSSetViewport(_viewport);
+        context.OMSetRenderTargets(rtv);
+        context.Draw(3, 0);
+
+        // Unbind so the next frame's CopyResource into the staging texture and the
+        // encoder's read of destBgra don't trip read/write hazard warnings.
+        context.OMSetRenderTargets((ID3D11RenderTargetView?)null);
+        context.PSSetShaderResource(0, null);
     }
 
-    private ID3D11VideoProcessorOutputView GetOutputView(ID3D11Texture2D destBgra)
+    private ID3D11RenderTargetView GetRenderTargetView(ID3D11Texture2D destBgra)
     {
-        if (_outputViews.TryGetValue(destBgra.NativePointer, out var existing))
+        if (_rtvs.TryGetValue(destBgra.NativePointer, out var existing))
             return existing;
 
-        var view = _videoDevice.CreateVideoProcessorOutputView(
-            destBgra, _enumerator,
-            new VideoProcessorOutputViewDescription
-            {
-                ViewDimension = VideoProcessorOutputViewDimension.Texture2D,
-                Texture2D     = new Texture2DVideoProcessorOutputView { MipSlice = 0 },
-            });
-        _outputViews[destBgra.NativePointer] = view;
-        return view;
+        var rtv = _device.CreateRenderTargetView(destBgra);
+        _rtvs[destBgra.NativePointer] = rtv;
+        return rtv;
     }
 
     public void Dispose()
     {
-        foreach (var view in _outputViews.Values) view.Dispose();
-        _outputViews.Clear();
-        _inputView?.Dispose();
+        foreach (var rtv in _rtvs.Values) rtv.Dispose();
+        _rtvs.Clear();
+        _rasterizer?.Dispose();
+        _srv?.Dispose();
         _stagingHdr?.Dispose();
-        _processor?.Dispose();
-        _enumerator?.Dispose();
-        _videoContext?.Dispose();
-        _videoDevice?.Dispose();
+        _ps?.Dispose();
+        _vs?.Dispose();
     }
 }
