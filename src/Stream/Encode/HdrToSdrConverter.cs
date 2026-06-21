@@ -23,13 +23,11 @@ namespace Strama.Encode;
 /// </summary>
 internal sealed class HdrToSdrConverter : IDisposable
 {
-    // Precompiled with fxc (vs_4_0 / ps_4_0). Source + recompile command in
+    // Shader bytecode is precompiled with fxc (vs_4_0 / ps_4_0) and embedded as a
+    // manifest resource so it loads binary-exact. Source + recompile command are in
     // src/Stream/Encode/Shaders/*.hlsl.
-    private const string VsBytecodeB64 =
-        "RFhCQz+aSUzVceIyN1VOzTCZ3n4BAAAAZAIAAAUAAAA0AAAAgAAAALQAAADoAAAA6AEAAFJERUZEAAAAAAAAAAAAAAAAAAAAHAAAAAAE/v8AgQAAHAAAAE1pY3Jvc29mdCAoUikgSExTTCBTaGFkZXIgQ29tcGlsZXIgMTAuMQBJU0dOLAAAAAEAAAAIAAAAIAAAAAAAAAAGAAAAAQAAAAAAAAABAQAAU1ZfVmVydGV4SUQAT1NHTiwAAAABAAAACAAAACAAAAAAAAAAAQAAAAMAAAAAAAAADwAAAFNWX1Bvc2l0aW9uAFNIRFL4AAAAQAABAD4AAABgAAAEEhAQAAAAAAAGAAAAZwAABPIgEAAAAAAAAQAAAGgAAAIBAAAAKQAABxIAEAAAAAAAChAQAAAAAAABQAAAAQAAAAEAAAcSABAAAAAAAAoAEAAAAAAAAUAAAAIAAAABAAAHQgAQAAAAAAAKEBAAAAAAAAFAAAACAAAAVgAABTIAEAAAAAAAhgAQAAAAAAAyAAAPMiAQAAAAAABGABAAAAAAAAJAAAAAAABAAAAAwAAAAAAAAAAAAkAAAAAAgL8AAIA/AAAAAAAAAAA2AAAIwiAQAAAAAAACQAAAAAAAAAAAAAAAAAAAAAACAPz4AAAFTVEFUdAAAAAcAAAABAAAAAAAAAAIAAAABAAAAAQAAAAIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
-    private const string PsBytecodeB64 =
-        "RFhCQ6qFIy2rXoCVSJTkNkSx3lEBAAAASAMAAAUAAAA0AAAApAAAANgAAAAMAQAAzAIAAFJERUZoAAAAAAAAAAAAAAABAAAAHAAAAAAE//8AgQAAQAAAADwAAAACAAAABQAAAAQAAAD/////AAAAAAEAAAANAAAAU3JjAE1pY3Jvc29mdCAoUikgSExTTCBTaGFkZXIgQ29tcGlsZXIgMTAuMQBJU0dOLAAAAAEAAAAIAAAAIAAAAAAAAAABAAAAAwAAAAAAAAAPAwAAU1ZfUG9zaXRpb24AT1NHTiwAAAABAAAACAAAACAAAAAAAAAAAAAAAAMAAAAAAAAADwAAAFNWX1RhcmdldACrq1NIRFK4AQAAQAAAAG4AAABYGAAEAHAQAAAAAABVVQAAZCAABDIQEAAAAAAAAQAAAGUAAAPyIBAAAAAAAGgAAAIDAAAAGwAABTIAEAAAAAAARhAQAAAAAAA2AAAIwgAQAAAAAAACQAAAAAAAAAAAAAAAAAAAAAAAAC0AAAfyABAAAAAAAEYOEAAAAAAARn4QAAAAAAA2IAAFcgAQAAAAAABGAhAAAAAAAC8AAAVyABAAAQAAAEYCEAAAAAAAOAAACnIAEAABAAAARgIQAAEAAAACQAAAVVXVPlVV1T5VVdU+AAAAABkAAAVyABAAAQAAAEYCEAABAAAAMgAAD3IAEAABAAAARgIQAAEAAAACQAAAPQqHPz0Khz89Coc/AAAAAAJAAACuR2G9rkdhva5HYb0AAAAAHQAACnIAEAACAAAAAkAAABwuTTscLk07HC5NOwAAAABGAhAAAAAAADgAAApyABAAAAAAAEYCEAAAAAAAAkAAAFK4TkFSuE5BUrhOQQAAAAA3AAAJciAQAAAAAABGAhAAAgAAAEYCEAAAAAAARgIQAAEAAAA2AAAFgiAQAAAAAAABQAAAAACAPz4AAAFTVEFUdAAAAA0AAAADAAAAAAAAAAIAAAAGAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAADAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    private const string VsResourceName = "fsq_vs.cso";
+    private const string PsResourceName = "hdr2sdr_ps.cso";
 
     private readonly ID3D11Device              _device;
     private readonly ID3D11VertexShader        _vs;
@@ -50,8 +48,8 @@ internal sealed class HdrToSdrConverter : IDisposable
         _device   = device;
         _viewport = new Viewport(0, 0, width, height, 0f, 1f);
 
-        _vs = device.CreateVertexShader(System.Convert.FromBase64String(VsBytecodeB64));
-        _ps = device.CreatePixelShader(System.Convert.FromBase64String(PsBytecodeB64));
+        _vs = device.CreateVertexShader(LoadShaderBytes(VsResourceName));
+        _ps = device.CreatePixelShader(LoadShaderBytes(PsResourceName));
 
         // The shader samples from an SRV, which needs a texture we control with the
         // ShaderResource bind flag. The acquired duplication texture can't reliably
@@ -99,8 +97,20 @@ internal sealed class HdrToSdrConverter : IDisposable
 
         // Unbind so the next frame's CopyResource into the staging texture and the
         // encoder's read of destBgra don't trip read/write hazard warnings.
-        context.OMSetRenderTargets((ID3D11RenderTargetView?)null);
-        context.PSSetShaderResource(0, null);
+        context.OMSetRenderTargets((ID3D11RenderTargetView)null!);
+        context.PSSetShaderResource(0, null!);
+    }
+
+    private static byte[] LoadShaderBytes(string resourceName)
+    {
+        var asm = typeof(HdrToSdrConverter).Assembly;
+        using var stream = asm.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException(
+                $"Embedded shader resource '{resourceName}' not found. " +
+                "Ensure the .cso is built as an EmbeddedResource with this LogicalName.");
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        return ms.ToArray();
     }
 
     private ID3D11RenderTargetView GetRenderTargetView(ID3D11Texture2D destBgra)

@@ -26,6 +26,13 @@
     <AvaloniaResource Include="src/UI/Assets/**" />
   </ItemGroup>
 
+  <!-- Precompiled HDR->SDR shaders (fxc output), embedded so they load binary-exact
+       at runtime. Source HLSL + recompile command live next to them. -->
+  <ItemGroup>
+    <EmbeddedResource Include="src/Stream/Encode/Shaders/fsq_vs.cso" LogicalName="fsq_vs.cso" />
+    <EmbeddedResource Include="src/Stream/Encode/Shaders/hdr2sdr_ps.cso" LogicalName="hdr2sdr_ps.cso" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.1" />
     <PackageReference Include="Avalonia.Desktop" Version="11.2.1" />
