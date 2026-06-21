@@ -138,10 +138,11 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
     // OutputWidth / OutputHeight from the config are ignored here.
     private void RunEncodeGpu(string encoderName, CancellationToken ct)
     {
-        D3D11Device?            d3dDevice   = null;
-        D3D11Context?           d3dCtx      = null;
-        IDXGIOutputDuplication? duplication = null;
-        D3D11Tex2D[]?           texPool     = null;
+        D3D11Device?            d3dDevice    = null;
+        D3D11Context?           d3dCtx       = null;
+        IDXGIOutputDuplication? duplication  = null;
+        D3D11Tex2D[]?           texPool      = null;
+        HdrToSdrConverter?      hdrConverter = null;
 
         AVCodecContext*  codecCtx    = null;
         AVFormatContext* fmtCtx      = null;
@@ -196,10 +197,21 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 
             Console.WriteLine($"[Encode] {srcW}x{srcH} GPU native, format={captureFormat}, encoder={encoderName}");
 
+            // On an HDR / 10-bit desktop, Desktop Duplication delivers
+            // R16G16B16A16_FLOAT (scRGB) or R10G10B10A2 (HDR10) instead of 8-bit
+            // BGRA. The encoder pipeline below is BGRA-only, so when the capture
+            // isn't BGRA we route every frame through a VideoProcessor that tone-maps
+            // HDR → SDR BGRA in hardware. SDR keeps the original zero-copy path.
+            bool needsHdrConvert = captureFormat != Format.B8G8R8A8_UNorm;
+            if (needsHdrConvert)
+                hdrConverter = new HdrToSdrConverter(d3dDevice, d3dCtx, srcW, srcH, captureFormat);
+
             // ── Intermediate texture pool ─────────────────────────────────────
-            // GPU-only textures (Usage.Default) — the GPU copies the DXGI-acquired
-            // texture here, then the encoder reads from here. Using a pool of 3
-            // gives the GPU pipeline room to breathe at high frame rates.
+            // GPU-only textures (Usage.Default) — the GPU copies (SDR) or tone-maps
+            // (HDR) the DXGI-acquired texture here, then the encoder reads from here.
+            // Always BGRA8: that's what the encoder's hwframes sw_format expects, and
+            // for SDR it matches the capture format so the copy stays a plain blit.
+            // A VideoProcessor output target additionally needs RenderTarget binding.
             const int PoolSize = 3;
             var texDesc = new Texture2DDescription
             {
@@ -207,10 +219,12 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 Height            = (uint)srcH,
                 MipLevels         = 1,
                 ArraySize         = 1,
-                Format            = captureFormat,
+                Format            = Format.B8G8R8A8_UNorm,
                 SampleDescription = new SampleDescription(1, 0),
                 Usage             = ResourceUsage.Default,
-                BindFlags         = BindFlags.ShaderResource,
+                BindFlags         = needsHdrConvert
+                    ? BindFlags.ShaderResource | BindFlags.RenderTarget
+                    : BindFlags.ShaderResource,
                 CPUAccessFlags    = CpuAccessFlags.None,
             };
             texPool = new D3D11Tex2D[PoolSize];
@@ -299,7 +313,8 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 using (primeRes)
                 {
                     using var dxgiTex = primeRes.QueryInterface<D3D11Tex2D>();
-                    d3dCtx.CopyResource(primeTex, dxgiTex);
+                    if (hdrConverter is null) d3dCtx.CopyResource(primeTex, dxgiTex);
+                    else                      hdrConverter.Convert(d3dCtx, dxgiTex, primeTex);
                 }
                 duplication.ReleaseFrame().CheckError();
 
@@ -412,7 +427,8 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 using (desktopResource)
                 {
                     using var dxgiTex = desktopResource.QueryInterface<D3D11Tex2D>();
-                    d3dCtx.CopyResource(interTex, dxgiTex);
+                    if (hdrConverter is null) d3dCtx.CopyResource(interTex, dxgiTex);
+                    else                      hdrConverter.Convert(d3dCtx, dxgiTex, interTex);
                 }
                 duplication.ReleaseFrame().CheckError();
 
@@ -481,6 +497,9 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
                 var p = (AVPacket*)pPtr;
                 ffmpeg.av_packet_free(&p);
             }
+            // Dispose the converter (and its VP views) before the pool textures
+            // those views reference.
+            hdrConverter?.Dispose();
             if (texPool != null) foreach (var t in texPool) t?.Dispose();
             if (hwDevBuf    != null) { var b = hwDevBuf;    ffmpeg.av_buffer_unref(&b); }
             if (hwFramesBuf != null) { var b = hwFramesBuf; ffmpeg.av_buffer_unref(&b); }
