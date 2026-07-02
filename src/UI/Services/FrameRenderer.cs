@@ -106,6 +106,15 @@ public sealed class FrameRenderer : INotifyPropertyChanged, IDisposable
         {
             Console.WriteLine($"[FrameRenderer] {ex.GetType().Name}: {ex.Message}");
         }
+        finally
+        {
+            // Frames still queued when we stop (cancellation mid-session) hold
+            // pooled buffers; the channel's itemDropped only covers evictions,
+            // so undelivered frames must be disposed here to return their
+            // buffers to the pool.
+            while (reader.TryRead(out var leftover))
+                leftover.Dispose();
+        }
     }
 
     private void EnsureBitmap(int width, int height)

@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Strama.UI.Services;
@@ -21,6 +22,11 @@ public sealed partial class HomeViewModel : ViewModelBase
 
     public ObservableCollection<RecentSessionItem> RecentSessions { get; } = [];
 
+    // The address of the in-flight outbound connect. Only promoted to the
+    // recent-sessions list once StreamStarted confirms the session came up —
+    // otherwise typos and unreachable peers would fill (and evict from) the list.
+    private string? _pendingRecent;
+
     public HomeViewModel(
         ConnectionManager conn,
         Func<ClientSettings> settingsProvider,
@@ -42,6 +48,16 @@ public sealed partial class HomeViewModel : ViewModelBase
         {
             RecentSessions.Add(RecentSessionItem.FromModel(session, ConnectAddressAsync));
         }
+
+        // StreamStarted fires on a background thread; RecentSessions is UI-bound.
+        conn.StreamStarted += _ => Dispatcher.UIThread.Post(() =>
+        {
+            if (_pendingRecent is { } address)
+            {
+                _pendingRecent = null;
+                AddRecentSession(address);
+            }
+        });
     }
 
     [RelayCommand(CanExecute = nameof(CanConnect))]
@@ -54,7 +70,7 @@ public sealed partial class HomeViewModel : ViewModelBase
         if (target.Length == 0) return;
 
         ConnectInput = target;
-        AddRecentSession(target);
+        _pendingRecent = target;
 
         var template = _settingsProvider().ToHandshakeConfig();
         await _conn.RequestConnectionAsync(target, template);
