@@ -36,6 +36,13 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
 {
     private readonly HandshakeConfig _config;
 
+    /// <summary>
+    /// Set when Run exits because of an unhandled error (DXGI AccessLost, driver
+    /// failure, FFmpeg error, …) rather than cancellation. ConnectionManager
+    /// surfaces it to the UI when it detects the encoder stopped mid-session.
+    /// </summary>
+    public string? FatalError { get; private set; }
+
     static RtpFrameEncoder()
     {
         if (string.IsNullOrEmpty(ffmpeg.RootPath))
@@ -52,6 +59,7 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            FatalError = $"{ex.GetType().Name}: {ex.Message}";
             Console.WriteLine($"[Encode] Fatal: {ex.GetType().Name}: {ex.Message}");
             Console.WriteLine($"[Encode] Stack:\n{ex.StackTrace}");
             if (ex.InnerException != null)

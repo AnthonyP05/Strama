@@ -317,19 +317,42 @@ public sealed class ConnectionManager : IDisposable
 
     private async Task MonitorHostSessionAsync(TcpClient tcp)
     {
-        try
-        {
-            // Block until the viewer either sends "disconnect" or closes its
-            // socket (returns empty string in that case).
-            var msg = await HandshakeProtocol.WaitForDisconnectAsync(tcp.GetStream());
-            if (msg == "disconnect")
-            {
-                try { await HandshakeProtocol.AckDisconnectAsync(tcp.GetStream()); } catch { }
-            }
-        }
-        catch { /* socket aborted — proceed to teardown */ }
+        // Capture session handles up front — teardown nulls the fields.
+        var encodeTask   = _encodeTask;
+        var encoder      = _encoder;
+        var sessionToken = _sessionCts?.Token ?? CancellationToken.None;
 
-        await TearDownSessionAsync(reason: null, sendDisconnectMessage: false);
+        var tcpClosed = Task.Run(async () =>
+        {
+            try
+            {
+                // Block until the viewer either sends "disconnect" or closes its
+                // socket (returns empty string in that case).
+                var msg = await HandshakeProtocol.WaitForDisconnectAsync(tcp.GetStream());
+                if (msg == "disconnect")
+                {
+                    try { await HandshakeProtocol.AckDisconnectAsync(tcp.GetStream()); } catch { }
+                }
+            }
+            catch { /* socket aborted — same outcome */ }
+        });
+
+        // Race the viewer's disconnect against the encoder ending on its own.
+        // Without the second arm, an encoder that dies mid-session (DXGI
+        // AccessLost on lock screen/UAC, a driver error, an FFmpeg failure)
+        // leaves the host stuck in Hosting and the viewer staring at a frozen
+        // frame — nothing else observes the encode task.
+        string? reason = null;
+        var finished = encodeTask is null
+            ? await Task.WhenAny(tcpClosed)
+            : await Task.WhenAny(tcpClosed, encodeTask);
+
+        if (finished == encodeTask && !sessionToken.IsCancellationRequested)
+            reason = encoder?.FatalError is { } err
+                ? $"Streaming stopped: {err}"
+                : "Streaming stopped unexpectedly.";
+
+        await TearDownSessionAsync(reason, sendDisconnectMessage: false);
     }
 
     private async Task MonitorViewerSessionAsync(TcpClient tcp, Task decoderRunning)
@@ -344,13 +367,20 @@ public sealed class ConnectionManager : IDisposable
             catch { /* socket aborted is fine — same outcome */ }
         });
 
-        try
-        {
-            await Task.WhenAny(decoderRunning, tcpClosed);
-        }
-        catch { /* swallowed — the teardown below covers cleanup */ }
+        var sessionToken = _sessionCts?.Token ?? CancellationToken.None;
 
-        await TearDownSessionAsync(reason: null, sendDisconnectMessage: false);
+        var finished = await Task.WhenAny(decoderRunning, tcpClosed);
+
+        // Decoder died on its own (bad SDP, UDP port in use, FFmpeg error) —
+        // tell the user why instead of silently returning to Home.
+        string? reason = null;
+        if (finished == decoderRunning && decoderRunning.IsFaulted && !sessionToken.IsCancellationRequested)
+        {
+            var ex = decoderRunning.Exception?.GetBaseException();
+            reason = $"Stream ended: {ex?.Message ?? "decoder stopped unexpectedly"}";
+        }
+
+        await TearDownSessionAsync(reason, sendDisconnectMessage: false);
     }
 
     private void SetState(ConnectionState next)
