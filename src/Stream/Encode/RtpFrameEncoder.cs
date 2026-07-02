@@ -373,7 +373,11 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             }
 
             // ── RTP output (opened after extradata is populated) ──────────────
-            string url = $"rtp://{_config.UdpIP}:{_config.UdpPort}";
+            // pkt_size caps each RTP datagram below the smallest MTU we expect to
+            // cross. FFmpeg's default (~1472) exceeds VPN MTUs (Tailscale/WireGuard
+            // ≈1280), forcing IP fragmentation — and losing one fragment discards
+            // the whole packet. 1200 is the conservative WebRTC-style choice.
+            string url = $"rtp://{_config.UdpIP}:{_config.UdpPort}?pkt_size=1200";
 
             AVFormatContext* fmtCtxTmp = null;
             ret = ffmpeg.avformat_alloc_output_context2(&fmtCtxTmp, null, "rtp", url);
@@ -576,7 +580,8 @@ public sealed unsafe class RtpFrameEncoder : IFrameEncoder
             if (ret < 0) ThrowFfmpegError("avcodec_open2", ret);
 
             // ── RTP output ───────────────────────────────────────────────────
-            string url = $"rtp://{_config.UdpIP}:{_config.UdpPort}";
+            // pkt_size: see the GPU path — keep datagrams under VPN MTUs.
+            string url = $"rtp://{_config.UdpIP}:{_config.UdpPort}?pkt_size=1200";
 
             AVFormatContext* fmtCtxTmp = null;
             ret = ffmpeg.avformat_alloc_output_context2(&fmtCtxTmp, null, "rtp", url);

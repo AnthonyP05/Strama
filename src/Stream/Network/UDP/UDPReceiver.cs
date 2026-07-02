@@ -40,7 +40,9 @@ public static class UDPReceiver
             a=rtpmap:96 H264/90000
             a=fmtp:96 packetization-mode=1
             """;
-        string path = Path.Combine(Path.GetTempPath(), "stream.sdp");
+        // Per-port filename so two instances on one machine (the standard local
+        // test setup) can't clobber each other's SDP.
+        string path = Path.Combine(Path.GetTempPath(), $"strama-{data.UdpPort}.sdp");
         File.WriteAllText(path, content);
         DebugLog.Line($"[Decode] SDP written to {path}");
         return path;
